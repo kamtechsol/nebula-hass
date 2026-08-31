@@ -15,5 +15,16 @@
       "name": "Generate pairing code",
       "description": "Creates a single-use PIN (valid 5 minutes) to link the Nebula app. The PIN is returned and also shown as a notification."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nebula",
+        "description": "Panel token (the Nebula panel uses this on /api/nebula/panel, or any valid Home Assistant token):\n\n**{token}**\n\nTick to generate a new one.",
+        "data": {
+          "regenerate": "Regenerate panel token"
+        }
+      }
+    }
   }
 }

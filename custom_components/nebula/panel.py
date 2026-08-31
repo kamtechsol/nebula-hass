@@ -84,8 +84,8 @@ class PanelChannel:
         return True
 
     async def handle(self, request: web.Request) -> web.WebSocketResponse:
-        if request.query.get("token") != self._token:
-            raise web.HTTPForbidden(text="bad panel token")
+        if not await self._authorized(request):
+            raise web.HTTPForbidden(text="unauthorized")
 
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=0)
         await ws.prepare(request)
@@ -110,6 +110,24 @@ class PanelChannel:
                 self._emit({"type": "panel_status", "connected": False})
                 self._emit({"type": "media", "media": self._media})
         return ws
+
+    async def _authorized(self, request: web.Request) -> bool:
+        """Accept the panel token, OR any valid Home Assistant access token — so
+        a panel that already has HA credentials (for voice) needs no extra setup."""
+        tok = request.query.get("token") or ""
+        if not tok:
+            auth = request.headers.get("Authorization", "")
+            tok = auth[7:] if auth.startswith("Bearer ") else ""
+        if tok and self._token and tok == self._token:
+            return True
+        hass = request.app["hass"]
+        try:
+            result = hass.auth.async_validate_access_token(tok)
+            if hasattr(result, "__await__"):
+                result = await result
+        except Exception:  # noqa: BLE001
+            result = None
+        return result is not None
 
     def _on_message(self, msg: dict[str, Any]) -> None:
         self._last_seen = time.monotonic()
