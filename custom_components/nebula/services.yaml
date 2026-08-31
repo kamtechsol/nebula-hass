@@ -1,0 +1,7 @@
+pair_code:
+  name: Generate pairing code
+  description: >-
+    Creates a single-use PIN (valid 5 minutes) that the Nebula app exchanges for
+    a long-lived token via /api/nebula/pair. The PIN is returned as a response
+    and also raised as a notification.
+  fields: {}

@@ -1,0 +1,13 @@
+{
+  "domain": "nebula",
+  "name": "Nebula",
+  "codeowners": ["@voidpanel"],
+  "config_flow": true,
+  "dependencies": ["http", "api", "websocket_api", "zeroconf"],
+  "documentation": "https://github.com/voidpanel/nebula-hass",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/voidpanel/nebula-hass/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

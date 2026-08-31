@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nebula",
+        "description": "Set up the Nebula bridge. This exposes a combined room / scene / automation feed for the Nebula app and panel, advertises this instance on the LAN, and adds connection sensors.\n\nAfter setup, use the **nebula.pair_code** action (or the panel's pairing screen) to link the app."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Nebula is already configured."
+    }
+  },
+  "services": {
+    "pair_code": {
+      "name": "Generate pairing code",
+      "description": "Creates a single-use PIN (valid 5 minutes) to link the Nebula app. The PIN is returned and also shown as a notification."
+    }
+  }
+}
