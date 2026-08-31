@@ -19,7 +19,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CLIENT_KINDS, DATA_MANAGER, DOMAIN, PAIR_PIN_TTL
+from .const import CLIENT_KINDS, DATA_MANAGER, DOMAIN, PAIR_PIN_TTL, PANEL_CALL_DOMAINS
 
 
 def _manager(hass: HomeAssistant):
@@ -93,18 +93,36 @@ def ws_pair_code(hass, connection, msg) -> None:
     {
         vol.Required("type"): "nebula/call",
         vol.Required("domain"): str,
-        vol.Required("service"): str,
+        vol.Optional("service"): str,
+        vol.Optional("action"): str,
         vol.Optional("target"): dict,
         vol.Optional("data"): dict,
     }
 )
 @websocket_api.async_response
 async def ws_call(hass, connection, msg) -> None:
-    """Thin pass-through to call_service, so the app has one message type."""
+    """One command channel for the app.
+
+    * `domain` in ("panel", "media", "nebula")  -> forwarded to the panel as
+      `{action: <service|action>, **data}`  (transport / volume / source /
+      radio / timers / alarms / voice / eq / bt).
+    * anything else -> Home Assistant `call_service` (lights, scenes, …).
+    """
+    domain = msg["domain"]
+    data = msg.get("data", {}) or {}
+
+    if domain in PANEL_CALL_DOMAINS:
+        manager = _manager(hass)
+        action = msg.get("service") or msg.get("action") or ""
+        ok = bool(manager and manager.panel
+                  and await manager.panel.send_command(action, **data))
+        connection.send_result(msg["id"], {"delivered": ok})
+        return
+
     await hass.services.async_call(
-        msg["domain"],
-        msg["service"],
-        msg.get("data", {}),
+        domain,
+        msg.get("service") or msg.get("action"),
+        data,
         blocking=False,
         target=msg.get("target"),
         context=connection.context(msg),

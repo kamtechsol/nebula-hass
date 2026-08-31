@@ -8,6 +8,7 @@ surface, LAN discovery via zeroconf, and connection-state sensors.
 from __future__ import annotations
 
 import logging
+import secrets
 import socket
 
 import voluptuous as vol
@@ -24,20 +25,36 @@ from homeassistant.core import (
 from homeassistant.helpers import network
 
 from .api import async_register_http
-from .const import DATA_MANAGER, DOMAIN, ZEROCONF_TYPE
+from .const import CONF_PANEL_TOKEN, DATA_MANAGER, DATA_PANEL, DOMAIN, ZEROCONF_TYPE
 from .manager import NebulaManager
+from .panel import NebulaPanelView, PanelChannel
 from .websocket_api import async_register_websocket
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Nebula from a config entry."""
     domain_data = hass.data.setdefault(DOMAIN, {})
 
+    # Panel <-> integration shared secret. Auto-generate + persist once.
+    panel_token = entry.options.get(CONF_PANEL_TOKEN)
+    if not panel_token:
+        panel_token = secrets.token_hex(16)
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_PANEL_TOKEN: panel_token}
+        )
+    _LOGGER.info("Nebula panel token: %s", panel_token)
+
+    # One process-wide panel channel.
+    panel: PanelChannel = domain_data.get(DATA_PANEL) or PanelChannel(panel_token)
+    panel.set_token(panel_token)
+    domain_data[DATA_PANEL] = panel
+
     manager = NebulaManager(hass, entry.entry_id)
+    manager.async_set_panel(panel)
     manager.async_start()
     domain_data[entry.entry_id] = {DATA_MANAGER: manager}
 
@@ -46,6 +63,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_register_http(hass)
         async_register_websocket(hass)
         _async_register_services(hass)
+        hass.http.register_view(NebulaPanelView(panel))
         domain_data["_http_registered"] = True
 
     await _async_advertise(hass, entry)
@@ -137,8 +155,10 @@ async def _async_advertise(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 "base_url": base_url,
                 "uuid": entry.entry_id,
                 "location": instance,
-                "auth": "pin",  # /api/nebula/pair PIN exchange available
-                "version": "0.1.0",
+                "auth": "pin",           # POST /api/nebula/pair
+                "app_path": "/api/websocket",   # then: nebula/subscribe
+                "panel_path": "/api/nebula/panel",
+                "version": "0.2.0",
             },
             server=f"nebula-{entry.entry_id[:8]}.local.",
         )

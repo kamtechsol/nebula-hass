@@ -4,6 +4,13 @@ DOMAIN = "nebula"
 
 # Data stored on hass.data[DOMAIN]
 DATA_MANAGER = "manager"
+DATA_PANEL = "panel"
+
+# Panel <-> integration shared secret (config-entry option; auto-generated).
+CONF_PANEL_TOKEN = "panel_token"
+
+# call domains that are routed to the panel instead of Home Assistant services.
+PANEL_CALL_DOMAINS = ("panel", "media", "nebula")
 
 # Zeroconf service advertised on the LAN so the Nebula app can find this
 # Home Assistant instance without the user typing a URL.

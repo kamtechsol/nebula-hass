@@ -66,6 +66,33 @@ class NebulaManager:
         self._pins: list[_Pin] = []
         self._unsub_state: CALLBACK_TYPE | None = None
         self._unsubs: list[CALLBACK_TYPE] = []
+        self.panel = None  # PanelChannel, set by __init__.py
+        self._unsub_panel: CALLBACK_TYPE | None = None
+
+    # ------------------------------------------------------------------ panel
+
+    @callback
+    def async_set_panel(self, channel) -> None:
+        """Wire the panel channel: fan its media / status events to subscribers,
+        and reflect the panel's connectivity into the client bookkeeping."""
+        self.panel = channel
+
+        @callback
+        def _on_panel(event: dict[str, Any]) -> None:
+            if event.get("type") == "panel_status":
+                cid = "panel:panel"
+                if event.get("connected"):
+                    self._clients[cid] = _Client(kind="panel", name="Nebula panel")
+                else:
+                    self._clients.pop(cid, None)
+                self._notify_clients_changed()
+            for cb in list(self._listeners):
+                try:
+                    cb(event)
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception("Nebula listener raised")
+
+        self._unsub_panel = channel.add_listener(_on_panel)
 
     # ------------------------------------------------------------------ setup
 
@@ -93,6 +120,9 @@ class NebulaManager:
         if self._unsub_state:
             self._unsub_state()
             self._unsub_state = None
+        if self._unsub_panel:
+            self._unsub_panel()
+            self._unsub_panel = None
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
@@ -122,6 +152,14 @@ class NebulaManager:
             self._notify_clients_changed()
 
         return _remove
+
+    @callback
+    def async_add_internal_listener(
+        self, cb: Callable[[dict[str, Any]], None]
+    ) -> CALLBACK_TYPE:
+        """Subscribe to the event stream without counting as a connected client."""
+        self._listeners.add(cb)
+        return lambda: self._listeners.discard(cb)
 
     @callback
     def async_heartbeat(self, *, kind: str, name: str) -> None:
@@ -269,6 +307,8 @@ class NebulaManager:
             "scenes": scenes,
             "scripts": scripts,
             "automations": automations,
+            "media": self.panel.media if self.panel else {},
+            "panel_connected": bool(self.panel and self.panel.connected),
             "ts": dt_util.utcnow().isoformat(),
         }
 
