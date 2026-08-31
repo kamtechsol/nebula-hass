@@ -5,3 +5,51 @@ pair_code:
     a long-lived token via /api/nebula/pair. The PIN is returned as a response
     and also raised as a notification.
   fields: {}
+
+panel_command:
+  name: Send panel command
+  description: >-
+    Sends a raw command straight down to the Nebula panel over its WebSocket
+    (no HA Companion app required). Use from voice automations for timers,
+    alarms, sleep timers and playback.
+  fields:
+    action:
+      name: Action
+      description: >-
+        Panel handler to invoke: transport, volume, source, play_query,
+        timer_add, timer_cancel, alarm_add, alarm_cancel, dismiss.
+      required: true
+      example: timer_add
+      selector:
+        text:
+    seconds:
+      name: Seconds
+      description: Duration for timer_add.
+      example: 300
+      selector:
+        number:
+          min: 1
+          max: 86400
+          mode: box
+    label:
+      name: Label
+      description: Optional label for a timer or alarm.
+      example: pasta
+      selector:
+        text:
+    sleep:
+      name: Sleep timer
+      description: For timer_add — fade the music out instead of ringing.
+      selector:
+        boolean:
+    at:
+      name: At
+      description: Alarm time for alarm_add (e.g. "7:00 am").
+      example: "7:00 am"
+      selector:
+        text:
+    query:
+      name: Query
+      description: Search text for play_query.
+      selector:
+        text:

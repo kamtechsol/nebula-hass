@@ -24,6 +24,7 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.helpers import (
+    config_validation as cv,
     device_registry as dr,
     entity_registry as er,
     network,
@@ -203,6 +204,33 @@ def _async_register_services(hass: HomeAssistant) -> None:
         _pair_code,
         schema=vol.Schema({}),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def _panel_command(call: ServiceCall) -> None:
+        """Send a raw command frame down to the panel over its WebSocket.
+
+        `action` picks the panel handler (transport, volume, source, play_query,
+        timer_add, timer_cancel, alarm_add, alarm_cancel, dismiss, …); every
+        other field is passed through as-is. Used by voice automations that used
+        to poke the panel through the now-retired HA Companion app.
+        """
+        panel = hass.data.get(DOMAIN, {}).get(DATA_PANEL)
+        if panel is None:
+            _LOGGER.warning("nebula.panel_command: no panel channel")
+            return
+        data = dict(call.data)
+        action = data.pop("action")
+        ok = await panel.send_command(action, **data)
+        if not ok:
+            _LOGGER.warning("nebula.panel_command: panel offline, dropped %s", action)
+
+    hass.services.async_register(
+        DOMAIN,
+        "panel_command",
+        _panel_command,
+        schema=vol.Schema(
+            {vol.Required("action"): cv.string}, extra=vol.ALLOW_EXTRA
+        ),
     )
 
 
