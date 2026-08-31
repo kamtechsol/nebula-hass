@@ -3,11 +3,11 @@
   "name": "Nebula",
   "codeowners": ["@voidpanel"],
   "config_flow": true,
-  "dependencies": ["http", "api", "websocket_api", "zeroconf"],
+  "dependencies": ["http", "api", "websocket_api", "zeroconf", "intent"],
   "documentation": "https://github.com/voidpanel/nebula-hass",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/voidpanel/nebula-hass/issues",
   "requirements": [],
-  "version": "0.3.1"
+  "version": "0.4.0"
 }

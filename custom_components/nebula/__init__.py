@@ -21,11 +21,17 @@ from homeassistant.core import (
     ServiceCall,
     ServiceResponse,
     SupportsResponse,
+    callback,
 )
-from homeassistant.helpers import network
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    network,
+)
 
 from .api import async_register_http
 from .const import CONF_PANEL_TOKEN, DATA_MANAGER, DATA_PANEL, DOMAIN, ZEROCONF_TYPE
+from .device import panel_device_info
 from .manager import NebulaManager
 from .panel import NebulaPanelView, PanelChannel
 from .websocket_api import async_register_websocket
@@ -70,6 +76,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Register the "Nebula Panel" device and hand its id to the panel channel.
+    # The panel sends this device_id on every Assist pipeline run so HA's built-in
+    # intents (timers/alarms, room-aware media) have a device to resolve against.
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id, **panel_device_info()
+    )
+    panel.set_device_id(device.id)
+    _bind_voice(hass, entry, panel, device.id)
+
     entry.async_on_unload(entry.add_update_listener(_async_reload))
 
     async def _stop(_event) -> None:
@@ -98,6 +114,67 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+@callback
+def _bind_voice(
+    hass: HomeAssistant, entry: ConfigEntry, panel: PanelChannel, device_id: str
+) -> None:
+    """Make HA's voice intents work *on the panel*:
+
+    * expose ``media_player.nebula`` to the conversation agent so "play <song>"
+      has a target, and
+    * register a timer handler for the panel device so HA stops answering
+      "this device is not able to set or manage timers/alarms" — timer events
+      are forwarded down to the panel so it can show/ring them.
+    """
+    # --- expose the media player to Assist -------------------------------------
+    try:
+        from homeassistant.components.homeassistant.exposed_entities import (
+            async_expose_entity,
+        )
+
+        ent_reg = er.async_get(hass)
+        mp_id = ent_reg.async_get_entity_id(
+            "media_player", DOMAIN, f"{entry.entry_id}_media_player"
+        )
+        if mp_id:
+            for assistant in ("conversation", "cloud.alexa", "cloud.google_assistant"):
+                try:
+                    async_expose_entity(hass, assistant, mp_id, assistant == "conversation")
+                except Exception:  # noqa: BLE001
+                    pass
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Nebula: could not auto-expose media_player", exc_info=True)
+
+    # --- timer / alarm handler ----------------------------------------------------
+    try:
+        from homeassistant.components.intent import async_register_timer_handler
+    except ImportError:
+        _LOGGER.debug("Nebula: this HA has no timer intent support")
+        return
+
+    @callback
+    def _on_timer(event, timer) -> None:
+        ev = getattr(event, "value", str(event)).lower()
+        label = getattr(timer, "name", None) or ""
+        if ev in ("started", "updated"):
+            secs = int(getattr(timer, "seconds_left", 0) or getattr(timer, "seconds", 0) or 0)
+            if secs <= 0:
+                return
+            hass.async_create_task(
+                panel.send_command("timer_add", seconds=secs, label=label)
+            )
+        elif ev in ("cancelled", "finished"):
+            hass.async_create_task(panel.send_command("timer_cancel"))
+
+    try:
+        entry.async_on_unload(
+            async_register_timer_handler(hass, device_id, _on_timer)
+        )
+        _LOGGER.info("Nebula: timer handler registered for panel device %s", device_id)
+    except Exception:  # noqa: BLE001
+        _LOGGER.warning("Nebula: could not register timer handler", exc_info=True)
 
 
 def _async_register_services(hass: HomeAssistant) -> None:

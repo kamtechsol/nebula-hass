@@ -47,6 +47,7 @@ class PanelChannel:
 
     def __init__(self, token: str) -> None:
         self._token = token
+        self._device_id: str | None = None
         self._ws: web.WebSocketResponse | None = None
         self._media: dict[str, Any] = empty_media()
         self._last_seen = 0.0
@@ -54,6 +55,12 @@ class PanelChannel:
 
     def set_token(self, token: str) -> None:
         self._token = token
+
+    def set_device_id(self, device_id: str | None) -> None:
+        """The HA device-registry id of the "Nebula Panel" device. Sent to the
+        panel on connect so it can scope its Assist pipeline runs to this device
+        (needed for timers/alarms and room-aware media intents)."""
+        self._device_id = device_id
 
     @property
     def connected(self) -> bool:
@@ -96,6 +103,12 @@ class PanelChannel:
         _LOGGER.info("Nebula panel connected from %s", request.remote)
         self._emit({"type": "panel_status", "connected": True})
 
+        # Hand the panel its HA identity so it can scope Assist pipeline runs.
+        try:
+            await ws.send_json({"type": "welcome", "device_id": self._device_id})
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Nebula panel: welcome frame failed", exc_info=True)
+
         try:
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
@@ -136,6 +149,9 @@ class PanelChannel:
             payload.pop("type", None)
             self._media = {**empty_media(), **payload}
             self._emit({"type": "media", "media": self._media})
+        else:
+            # heartbeat / ack / anything else — signal liveness only
+            self._emit({"type": "panel_ping"})
 
 
 class NebulaPanelView(HomeAssistantView):

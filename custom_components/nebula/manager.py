@@ -79,13 +79,22 @@ class NebulaManager:
 
         @callback
         def _on_panel(event: dict[str, Any]) -> None:
-            if event.get("type") == "panel_status":
+            etype = event.get("type")
+            if etype == "panel_status":
                 cid = "panel:panel"
                 if event.get("connected"):
                     self._clients[cid] = _Client(kind="panel", name="Nebula panel")
                 else:
                     self._clients.pop(cid, None)
                 self._notify_clients_changed()
+            else:
+                # Any other panel event (media update, heartbeat ping) means the
+                # panel's WebSocket is alive — keep its client entry fresh.
+                cli = self._clients.get("panel:panel")
+                if cli is not None:
+                    cli.last_seen = time.monotonic()
+            if etype == "panel_ping":
+                return  # internal keepalive only — nothing for app listeners
             for cb in list(self._listeners):
                 try:
                     cb(event)
@@ -176,20 +185,30 @@ class NebulaManager:
             for c in self._clients.values()
             if now - c.last_seen < CLIENT_TIMEOUT
         }
+        # The panel holds a real WebSocket (aiohttp heartbeat=20); trust that
+        # directly instead of ageing it out like the app's shared-WS subscription.
+        if self.panel is not None and self.panel.connected:
+            alive.add("panel")
         return alive & set(CLIENT_KINDS)
 
     @callback
     def client_details(self) -> list[dict[str, Any]]:
         now = time.monotonic()
-        return [
-            {
-                "kind": c.kind,
-                "name": c.name,
-                "stale": (now - c.last_seen) >= CLIENT_TIMEOUT,
-                "age": round(now - c.last_seen, 1),
-            }
-            for c in self._clients.values()
-        ]
+        panel_live = self.panel is not None and self.panel.connected
+        out: list[dict[str, Any]] = []
+        for c in self._clients.values():
+            stale = (now - c.last_seen) >= CLIENT_TIMEOUT
+            if c.kind == "panel" and panel_live:
+                stale = False
+            out.append(
+                {
+                    "kind": c.kind,
+                    "name": c.name,
+                    "stale": stale,
+                    "age": round(now - c.last_seen, 1),
+                }
+            )
+        return out
 
     @callback
     def _notify_clients_changed(self) -> None:

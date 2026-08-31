@@ -12,6 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DATA_MANAGER, DOMAIN, SIGNAL_CLIENTS_CHANGED
+from .device import panel_device_info
 
 
 async def async_setup_entry(
@@ -54,6 +55,7 @@ class NebulaPanelSensor(SensorEntity):
         self._getter = getter
         self._attr_name = name
         self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_info = panel_device_info()
         self._attr_icon = icon
         self._attr_native_unit_of_measurement = unit
         if diagnostic:
