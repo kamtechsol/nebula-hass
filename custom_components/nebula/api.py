@@ -126,11 +126,14 @@ class NebulaPairView(HomeAssistantView):
         except network.NoURLAvailableError:
             base_url = None
 
+        from .manager import remote_ui_url
+
         return self.json(
             {
                 "access_token": access_token,
                 "token_type": "long_lived",
                 "base_url": base_url,
+                "cloud_url": remote_ui_url(hass),
                 "ha_version": hass.config.as_dict().get("version"),
                 "location_name": hass.config.location_name,
             }

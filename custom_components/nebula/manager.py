@@ -41,6 +41,18 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def remote_ui_url(hass: HomeAssistant) -> str | None:
+    """The Nabu Casa remote URL (https://<id>.ui.nabu.casa) when the user has
+    Home Assistant Cloud with remote access on — so the Nebula app can reach the
+    same hub from outside the LAN. None if Cloud isn't set up / remote is off."""
+    try:
+        from homeassistant.components.cloud import async_remote_ui_url
+
+        return async_remote_ui_url(hass)
+    except Exception:  # noqa: BLE001 - CloudNotAvailable, not installed, etc.
+        return None
+
+
 @dataclass
 class _Client:
     kind: str
@@ -321,6 +333,7 @@ class NebulaManager:
             "type": "snapshot",
             "ha_version": self.hass.config.as_dict().get("version"),
             "location_name": self.hass.config.location_name,
+            "cloud_url": remote_ui_url(self.hass),
             "rooms": sorted(rooms.values(), key=lambda r: r["name"].lower()),
             "unassigned": unassigned,
             "scenes": scenes,

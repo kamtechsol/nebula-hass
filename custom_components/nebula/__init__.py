@@ -251,20 +251,27 @@ async def _async_advertise(hass: HomeAssistant, entry: ConfigEntry) -> None:
         host_ip = await async_get_source_ip(hass)
         instance = hass.config.location_name or "Home Assistant"
 
+        from .manager import remote_ui_url
+
+        props = {
+            "base_url": base_url,
+            "uuid": entry.entry_id,
+            "location": instance,
+            "auth": "pin",           # POST /api/nebula/pair
+            "app_path": "/api/websocket",   # then: nebula/subscribe
+            "panel_path": "/api/nebula/panel",
+            "version": "0.5.0",
+        }
+        cloud = remote_ui_url(hass)
+        if cloud:
+            props["remote_url"] = cloud   # reachable from off-LAN via Nabu Casa
+
         info = ServiceInfo(
             ZEROCONF_TYPE,
             name=f"{instance}.{ZEROCONF_TYPE}",
             addresses=[socket.inet_aton(host_ip)] if host_ip else [],
             port=port,
-            properties={
-                "base_url": base_url,
-                "uuid": entry.entry_id,
-                "location": instance,
-                "auth": "pin",           # POST /api/nebula/pair
-                "app_path": "/api/websocket",   # then: nebula/subscribe
-                "panel_path": "/api/nebula/panel",
-                "version": "0.2.0",
-            },
+            properties=props,
             server=f"nebula-{entry.entry_id[:8]}.local.",
         )
         await aiozc.async_register_service(info, allow_name_change=True)
