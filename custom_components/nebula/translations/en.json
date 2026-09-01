@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Nebula",
-        "description": "Set up the Nebula bridge. This exposes a combined room / scene / automation feed for the Nebula app and panel, advertises this instance on the LAN, and adds connection sensors.\n\nAfter setup, use the **nebula.pair_code** action (or the panel's pairing screen) to link the app."
+        "description": "Set up the Nebula bridge. This exposes a combined room / scene / automation feed for the Nebula app and panel, advertises this instance on the LAN, and adds connection sensors.\n\nAfter setup, scan the QR in the **Pair the Nebula app** notification with the Nebula Home app."
       }
     },
     "abort": {
@@ -13,7 +13,7 @@
   "services": {
     "pair_code": {
       "name": "Generate pairing code",
-      "description": "Creates a single-use PIN (valid 5 minutes) to link the Nebula app. The PIN is returned and also shown as a notification."
+      "description": "Rotates the Nebula pairing code and re-raises the \"Pair the Nebula app\" notification with a fresh QR to scan. The code is single-use and valid ~30 minutes. You normally don't need this — the notification appears on its own until an app has paired."
     }
   },
   "options": {

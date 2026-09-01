@@ -65,6 +65,7 @@ class _Pin:
     code: str
     created: float
     user_id: str
+    ttl: float = PAIR_PIN_TTL
 
 
 class NebulaManager:
@@ -229,12 +230,35 @@ class NebulaManager:
     # ------------------------------------------------------------------ pairing
 
     @callback
-    def new_pin(self, user_id: str) -> str:
-        """Mint a short pairing PIN owned by `user_id`, pruning expired ones."""
+    def new_pin(self, user_id: str, *, ttl: float = PAIR_PIN_TTL) -> str:
+        """Mint a short pairing PIN owned by `user_id`, pruning expired ones.
+
+        `ttl` is how long this code stays valid — short (5 min) for a PIN typed
+        by hand, longer for the QR code that sits in a persistent notification.
+        """
         self._prune_pins()
         code = f"{secrets.randbelow(1_000_000):06d}"
-        self._pins.append(_Pin(code=code, created=time.monotonic(), user_id=user_id))
+        self._pins.append(
+            _Pin(code=code, created=time.monotonic(), user_id=user_id, ttl=ttl)
+        )
         return code
+
+    @callback
+    def new_qr_code(self, user_id: str, *, ttl: float) -> str:
+        """Mint the pairing code embedded in the QR notification.
+
+        Only one QR code is live at a time — any previous QR code is dropped so a
+        regenerate genuinely invalidates the old poster.
+        """
+        self._pins = [p for p in self._pins if p.ttl < ttl]  # keep only short PINs
+        return self.new_pin(user_id, ttl=ttl)
+
+    @callback
+    def active_qr_code(self) -> str | None:
+        """The live QR pairing code (longest-TTL unconsumed pin), or None."""
+        self._prune_pins()
+        qr = [p for p in self._pins if p.ttl > PAIR_PIN_TTL]
+        return max(qr, key=lambda p: p.created).code if qr else None
 
     @callback
     def consume_pin(self, code: str) -> str | None:
@@ -248,8 +272,8 @@ class NebulaManager:
 
     @callback
     def _prune_pins(self) -> None:
-        cutoff = time.monotonic() - PAIR_PIN_TTL
-        self._pins = [p for p in self._pins if p.created > cutoff]
+        now = time.monotonic()
+        self._pins = [p for p in self._pins if now - p.created < p.ttl]
 
     # ------------------------------------------------------------------ state
 

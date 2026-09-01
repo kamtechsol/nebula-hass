@@ -3,6 +3,7 @@
 * GET  /api/nebula/snapshot   (HA auth)  - the combined Home/Scenes/Automations picture
 * GET  /api/nebula/clients    (HA auth)  - who is currently connected
 * POST /api/nebula/pair       (no auth)  - exchange a single-use PIN for a long-lived token
+* GET  /api/nebula/pair_qr    (no auth)  - PNG QR of the live pairing code (404 if none)
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ def async_register_http(hass: HomeAssistant) -> None:
     hass.http.register_view(NebulaSnapshotView())
     hass.http.register_view(NebulaClientsView())
     hass.http.register_view(NebulaPairView())
+    hass.http.register_view(NebulaPairQRView())
 
 
 class NebulaSnapshotView(HomeAssistantView):
@@ -137,4 +139,41 @@ class NebulaPairView(HomeAssistantView):
                 "ha_version": hass.config.as_dict().get("version"),
                 "location_name": hass.config.location_name,
             }
+        )
+
+
+class NebulaPairQRView(HomeAssistantView):
+    """PNG QR of the live pairing code, for the persistent-notification poster.
+
+    Unauthenticated so it renders in an `<img>` inside the notification. It only
+    returns anything while a QR pairing code is actually live (raised on startup
+    when no app has paired, or by the `nebula.pair_code` service); otherwise 404.
+    The code it encodes is single-use and time-limited — same exposure as the
+    number printed next to it.
+    """
+
+    url = "/api/nebula/pair_qr"
+    name = "api:nebula:pair_qr"
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        manager = _manager(hass)
+        code = manager.active_qr_code() if manager else None
+        if not code:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+
+        from .pairing import async_lan_host_port, pair_uri, qr_png
+
+        host, port = await async_lan_host_port(hass)
+        uri = pair_uri(host, port, code, hass.config.location_name)
+        try:
+            png = await hass.async_add_executor_job(qr_png, uri)
+        except Exception:  # noqa: BLE001 - segno missing / render failure
+            _LOGGER.exception("Nebula: could not render pairing QR")
+            return web.Response(status=HTTPStatus.INTERNAL_SERVER_ERROR)
+        return web.Response(
+            body=png,
+            content_type="image/png",
+            headers={"Cache-Control": "no-store"},
         )

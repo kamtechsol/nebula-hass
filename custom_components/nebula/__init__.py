@@ -29,11 +29,23 @@ from homeassistant.helpers import (
     entity_registry as er,
     network,
 )
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .api import async_register_http
-from .const import CONF_PANEL_TOKEN, DATA_MANAGER, DATA_PANEL, DOMAIN, ZEROCONF_TYPE
+from .const import (
+    CONF_PANEL_TOKEN,
+    DATA_MANAGER,
+    DATA_PANEL,
+    DOMAIN,
+    NOTIFY_PAIRING,
+    PAIR_CODE_TTL,
+    PAIR_TOKEN_PREFIX,
+    SIGNAL_CLIENTS_CHANGED,
+    ZEROCONF_TYPE,
+)
 from .device import panel_device_info
 from .manager import NebulaManager
+from .pairing import async_get_source_ip, async_lan_host_port, pair_uri
 from .panel import NebulaPanelView, PanelChannel
 from .websocket_api import async_register_websocket
 
@@ -89,6 +101,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
 
+    # Show the pairing QR on first run (until an app has actually paired), and
+    # take it down again as soon as one connects.
+    await _async_setup_pairing_notification(hass, entry)
+
     async def _stop(_event) -> None:
         manager.async_stop()
 
@@ -115,6 +131,107 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+# --------------------------------------------------------------------------- #
+#  QR pairing notification                                                     #
+# --------------------------------------------------------------------------- #
+
+
+def _manager_for(hass: HomeAssistant):
+    for data in hass.data.get(DOMAIN, {}).values():
+        if isinstance(data, dict) and DATA_MANAGER in data:
+            return data[DATA_MANAGER]
+    return None
+
+
+async def _async_pairing_owner(hass: HomeAssistant):
+    """The human user a pairing code (and the token it mints) belongs to."""
+    try:
+        from homeassistant.auth.const import GROUP_ID_ADMIN
+    except ImportError:  # pragma: no cover
+        GROUP_ID_ADMIN = "system-admin"
+
+    users = await hass.auth.async_get_users()
+    humans = [u for u in users if u.is_active and not u.system_generated]
+    for u in humans:
+        if u.is_owner:
+            return u
+    for u in humans:
+        if any(g.id == GROUP_ID_ADMIN for g in u.groups):
+            return u
+    return humans[0] if humans else None
+
+
+async def _async_has_paired_app(hass: HomeAssistant) -> bool:
+    """True once any Nebula app holds a long-lived token (`Nebula: <device>`)."""
+    for user in await hass.auth.async_get_users():
+        for tok in user.refresh_tokens.values():
+            if (tok.client_name or "").startswith(PAIR_TOKEN_PREFIX):
+                return True
+    return False
+
+
+async def _async_raise_pairing_notification(
+    hass: HomeAssistant, *, regenerate: bool = False, owner_id: str | None = None
+) -> str | None:
+    """Mint a QR pairing code (if needed) and (re)raise the notification.
+
+    `owner_id` is the user the minted token will belong to; defaults to the
+    household owner so the poster works for whoever walks up to it.
+    """
+    manager = _manager_for(hass)
+    if manager is None:
+        return None
+
+    code = None if regenerate else manager.active_qr_code()
+    if code is None:
+        if owner_id is None:
+            owner = await _async_pairing_owner(hass)
+            owner_id = owner.id if owner else None
+        if owner_id is None:
+            _LOGGER.warning("Nebula: no user to own a pairing code")
+            return None
+        code = manager.new_qr_code(owner_id, ttl=PAIR_CODE_TTL)
+
+    host, port = await async_lan_host_port(hass)
+    uri = pair_uri(host, port, code, hass.config.location_name)
+    mins = PAIR_CODE_TTL // 60
+    from time import time as _time
+
+    message = (
+        "Open **Nebula Home** on your phone and scan this — no Developer Tools needed.\n\n"
+        f"![Nebula pairing QR](/api/nebula/pair_qr?t={int(_time())})\n\n"
+        f"Manual code: **{code}**  (valid ~{mins} min · single use)\n\n"
+        f"Or tap on the phone: [{uri}]({uri})"
+    )
+    persistent_notification.async_create(
+        hass,
+        message,
+        title="Pair the Nebula app",
+        notification_id=NOTIFY_PAIRING,
+    )
+    return code
+
+
+async def _async_setup_pairing_notification(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Raise the QR on first run; clear it once an app has paired / connected."""
+    if await _async_has_paired_app(hass):
+        persistent_notification.async_dismiss(hass, NOTIFY_PAIRING)
+    else:
+        await _async_raise_pairing_notification(hass)
+
+    @callback
+    def _on_clients_changed(_entry_id: str) -> None:
+        manager = _manager_for(hass)
+        if manager and "app" in manager.connected_kinds():
+            persistent_notification.async_dismiss(hass, NOTIFY_PAIRING)
+
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_CLIENTS_CHANGED, _on_clients_changed)
+    )
 
 
 @callback
@@ -182,21 +299,23 @@ def _async_register_services(hass: HomeAssistant) -> None:
     """`nebula.pair_code` — get a pairing PIN without needing the panel."""
 
     async def _pair_code(call: ServiceCall) -> ServiceResponse:
-        manager = None
-        for data in hass.data.get(DOMAIN, {}).values():
-            if isinstance(data, dict) and DATA_MANAGER in data:
-                manager = data[DATA_MANAGER]
-                break
+        manager = _manager_for(hass)
         if manager is None or call.context.user_id is None:
             return {"error": "unavailable"}
-        pin = manager.new_pin(call.context.user_id)
-        persistent_notification.async_create(
-            hass,
-            f"Enter this in the Nebula app within 5 minutes:\n\n# {pin}",
-            title="Nebula pairing PIN",
-            notification_id="nebula_pair_code",
+        # Rotate the QR poster's code and re-raise it with the new value, owned
+        # by whoever ran the service.
+        code = await _async_raise_pairing_notification(
+            hass, regenerate=True, owner_id=call.context.user_id
         )
-        return {"pin": pin, "expires_in": 300}
+        if code is None:
+            code = manager.new_pin(call.context.user_id)
+            persistent_notification.async_create(
+                hass,
+                f"Enter this in the Nebula app within 5 minutes:\n\n# {code}",
+                title="Nebula pairing PIN",
+                notification_id="nebula_pair_code",
+            )
+        return {"pin": code, "expires_in": PAIR_CODE_TTL}
 
     hass.services.async_register(
         DOMAIN,
@@ -260,7 +379,8 @@ async def _async_advertise(hass: HomeAssistant, entry: ConfigEntry) -> None:
             "auth": "pin",           # POST /api/nebula/pair
             "app_path": "/api/websocket",   # then: nebula/subscribe
             "panel_path": "/api/nebula/panel",
-            "version": "0.5.0",
+            "pair_qr": "/api/nebula/pair_qr",
+            "version": "0.6.0",
         }
         cloud = remote_ui_url(hass)
         if cloud:
@@ -279,15 +399,3 @@ async def _async_advertise(hass: HomeAssistant, entry: ConfigEntry) -> None:
         _LOGGER.debug("Advertised %s at %s", ZEROCONF_TYPE, base_url)
     except Exception:  # noqa: BLE001 - discovery is best-effort
         _LOGGER.warning("Nebula: could not advertise over zeroconf", exc_info=True)
-
-
-async def async_get_source_ip(hass: HomeAssistant) -> str | None:
-    try:
-        from homeassistant.helpers.network import async_get_source_ip as _get
-
-        return await _get(hass)
-    except Exception:  # noqa: BLE001
-        try:
-            return socket.gethostbyname(socket.gethostname())
-        except OSError:
-            return None

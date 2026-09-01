@@ -18,9 +18,14 @@ ZEROCONF_TYPE = "_nebula._tcp.local."
 ZEROCONF_NAME = "Nebula @ {location} ({instance})"
 
 # Pairing
-PAIR_PIN_TTL = 300  # seconds a pairing PIN stays valid
+PAIR_PIN_TTL = 300  # seconds a manually-generated pairing PIN stays valid
+PAIR_CODE_TTL = 1800  # seconds the QR pairing code (shown in a notification) stays valid
 PAIR_TOKEN_NAME = "Nebula app"
+PAIR_TOKEN_PREFIX = "Nebula: "  # long-lived token client_name prefix — one per paired app
 CLIENT_NAME_MAX = 64
+
+# persistent_notification ids
+NOTIFY_PAIRING = "nebula_pairing"
 
 # Client kinds reported by subscribers
 CLIENT_APP = "app"

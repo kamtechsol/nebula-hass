@@ -10,7 +10,8 @@
     "api",
     "websocket_api",
     "zeroconf",
-    "intent"
+    "intent",
+    "persistent_notification"
   ],
   "after_dependencies": [
     "cloud"
@@ -19,6 +20,6 @@
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/voidpanel/nebula-hass/issues",
-  "requirements": [],
-  "version": "0.5.0"
+  "requirements": ["segno==1.6.1"],
+  "version": "0.6.0"
 }
