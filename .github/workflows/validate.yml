@@ -23,3 +23,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # this is a custom repo — its brand images aren't (and needn't be)
+          # in home-assistant/brands
+          ignore: brands

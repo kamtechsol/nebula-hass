@@ -1,5 +1,11 @@
 # Nebula for Home Assistant
 
+> **Beta.** Part of the **Nebula Home** system — this integration is the *hub*.
+> The companion pieces (Nebula HOST config backend, the Nebula Home iOS app, an
+> optional wall panel) live in [`kamtechsol/nebula-control`](https://github.com/kamtechsol/nebula-control);
+> start with its `host/SETUP.md`. Please file issues with your HA install type
+> (OS / Container / Supervised) and version.
+
 Custom integration that pairs the **Nebula** app + panel with Home Assistant and
 keeps the connection alive from the HA side.
 
@@ -23,7 +29,7 @@ It gives Nebula clients one thing to talk to:
 ### HACS (custom repository)
 
 1. HACS → ⋮ → **Custom repositories**
-2. Add `https://github.com/voidpanel/nebula-hass`, category **Integration**
+2. Add `https://github.com/kamtechsol/nebula-hass`, category **Integration**
 3. Install **Nebula**, restart Home Assistant
 4. **Settings → Devices & Services → Add Integration → Nebula**
 

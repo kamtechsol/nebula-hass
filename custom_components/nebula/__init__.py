@@ -380,7 +380,7 @@ async def _async_advertise(hass: HomeAssistant, entry: ConfigEntry) -> None:
             "app_path": "/api/websocket",   # then: nebula/subscribe
             "panel_path": "/api/nebula/panel",
             "pair_qr": "/api/nebula/pair_qr",
-            "version": "0.6.0",
+            "version": "0.7.0",
         }
         cloud = remote_ui_url(hass)
         if cloud:
