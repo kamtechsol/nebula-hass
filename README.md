@@ -3,8 +3,11 @@
 > **Beta.** Part of the **Nebula Home** system — this integration is the *hub*.
 > The companion pieces (Nebula HOST config backend, the Nebula Home iOS app, an
 > optional wall panel) live in [`kamtechsol/nebula-control`](https://github.com/kamtechsol/nebula-control);
-> start with its `host/SETUP.md`. Please file issues with your HA install type
-> (OS / Container / Supervised) and version.
+> start with its `host/SETUP.md`. Firmware updates for panels running Nebula
+> Cosmos UI are served by a separate integration,
+> [`kamtechsol/nebula-ota-hass`](https://github.com/kamtechsol/nebula-ota-hass).
+> Please file issues with your HA install type (OS / Container / Supervised) and
+> version.
 
 Custom integration that pairs the **Nebula** app + panel with Home Assistant and
 keeps the connection alive from the HA side.
