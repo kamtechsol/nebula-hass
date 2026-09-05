@@ -17,7 +17,7 @@ from aiohttp import web
 import voluptuous as vol
 
 from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
-from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http import KEY_HASS_USER, HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
@@ -50,7 +50,15 @@ class NebulaSnapshotView(HomeAssistantView):
         manager = _manager(hass)
         if manager is None:
             return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
-        return self.json(manager.build_snapshot())
+        snapshot = manager.build_snapshot()
+        # So an app holding only a manually-entered long-lived token (the
+        # "Advanced" path, no PIN exchange to piggyback on) still gets the
+        # linked Home Assistant user's own display name — same as the PIN
+        # flow returns from /api/nebula/pair. This is the one identity
+        # Nebula relies on: no separate Nebula account, ever.
+        hass_user = request.get(KEY_HASS_USER)
+        snapshot["user_name"] = hass_user.name if hass_user else None
+        return self.json(snapshot)
 
 
 class NebulaClientsView(HomeAssistantView):
@@ -138,6 +146,7 @@ class NebulaPairView(HomeAssistantView):
                 "cloud_url": remote_ui_url(hass),
                 "ha_version": hass.config.as_dict().get("version"),
                 "location_name": hass.config.location_name,
+                "user_name": user.name,
             }
         )
 
