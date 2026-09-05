@@ -300,15 +300,25 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _pair_code(call: ServiceCall) -> ServiceResponse:
         manager = _manager_for(hass)
-        if manager is None or call.context.user_id is None:
+        if manager is None:
             return {"error": "unavailable"}
-        # Rotate the QR poster's code and re-raise it with the new value, owned
-        # by whoever ran the service.
+        # Whoever ran this owns the minted token — but a service call with no
+        # attributable person (an automation, e.g. the webhook rule the Nebula
+        # Home apps use to ask for a fresh code from their Connect screen) has
+        # no context.user_id at all. Fall back to the household owner, same as
+        # _async_raise_pairing_notification already does for its own owner_id.
+        owner_id = call.context.user_id
+        if owner_id is None:
+            owner = await _async_pairing_owner(hass)
+            if owner is None:
+                return {"error": "unavailable"}
+            owner_id = owner.id
+        # Rotate the QR poster's code and re-raise it with the new value.
         code = await _async_raise_pairing_notification(
-            hass, regenerate=True, owner_id=call.context.user_id
+            hass, regenerate=True, owner_id=owner_id
         )
         if code is None:
-            code = manager.new_pin(call.context.user_id)
+            code = manager.new_pin(owner_id)
             persistent_notification.async_create(
                 hass,
                 f"Enter this in the Nebula app within 5 minutes:\n\n# {code}",

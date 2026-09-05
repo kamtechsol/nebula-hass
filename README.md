@@ -50,6 +50,39 @@ the QR now carries the HA link too, so one scan configures both.
 A PIN appears as a notification; enter it in the app under
 *More → Home Assistant → Link*.
 
+**From the app itself (iOS + Android):** the Connect screen's "New code" /
+"Ask Home Assistant for a new code" button POSTs to a webhook instead of
+requiring Developer Tools — add this automation once and it does the same
+thing `nebula.pair_code` does, triggered by the app instead of by hand:
+
+```yaml
+# Settings → Automations → ⋮ → Edit in YAML (or automations.yaml directly)
+alias: Nebula — new pairing notification on request
+description: >-
+  Refreshes the "Pair the Nebula app" notification whenever the Nebula Home
+  app (iOS or Android) asks for a fresh code from its own Connect screen,
+  instead of the person needing to open Developer Tools.
+triggers:
+  - trigger: webhook
+    webhook_id: nebula_pairing_request
+    allowed_methods:
+      - POST
+    local_only: true          # LAN only, same trust model as /api/enroll
+conditions: []
+actions:
+  - action: nebula.pair_code
+mode: single
+```
+
+`webhook_id: nebula_pairing_request` is the value both apps already POST to
+(`http://<host>:<port>/api/webhook/nebula_pairing_request`, no auth needed —
+that's the point) — keep it as-is unless you change it on the app side too.
+No response body is returned; the *result* is the refreshed "Pair the Nebula
+app" notification, same as running the service by hand. `pair_code`'s
+service handler falls back to the household owner when the caller has no
+attributable user (true for a webhook-triggered automation), so this works
+without any extra configuration.
+
 ## HTTP surface
 
 | Method | Path | Auth | Purpose |
