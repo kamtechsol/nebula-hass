@@ -11,6 +11,7 @@
     "websocket_api",
     "zeroconf",
     "intent",
+    "todo",
     "persistent_notification"
   ],
   "after_dependencies": [
@@ -21,5 +22,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/kamtechsol/nebula-hass/issues",
   "requirements": ["segno==1.6.1"],
-  "version": "0.7.1"
+  "version": "0.8.0"
 }
