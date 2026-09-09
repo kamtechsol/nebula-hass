@@ -33,6 +33,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CLIENT_KINDS,
     CLIENT_TIMEOUT,
+    DOMAIN,
     INTERESTING_DOMAINS,
     PAIR_PIN_TTL,
     SIGNAL_CLIENTS_CHANGED,
@@ -365,8 +366,13 @@ class NebulaManager:
             "automations": automations,
             "media": self.panel.media if self.panel else {},
             "panel_connected": bool(self.panel and self.panel.connected),
+            "spotify": self._spotify_snapshot(),
             "ts": dt_util.utcnow().isoformat(),
         }
+
+    def _spotify_snapshot(self) -> dict[str, Any]:
+        link = self.hass.data.get(DOMAIN, {}).get("spotify")
+        return link.snapshot() if link is not None else {"configured": False, "linked": False}
 
     @staticmethod
     @callback

@@ -7,6 +7,13 @@ pair_code:
     the notification appears on its own until an app has paired.
   fields: {}
 
+spotify_unlink:
+  name: Unlink Spotify
+  description: >-
+    Forgets the linked Spotify account (the stored refresh token). Displays and
+    apps will need to sign in again from their Spotify setup screen.
+  fields: {}
+
 panel_command:
   name: Send panel command
   description: >-

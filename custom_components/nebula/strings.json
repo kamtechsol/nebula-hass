@@ -14,15 +14,21 @@
     "pair_code": {
       "name": "Generate pairing code",
       "description": "Rotates the Nebula pairing code and re-raises the \"Pair the Nebula app\" notification with a fresh QR to scan. The code is single-use and valid ~30 minutes. You normally don't need this — the notification appears on its own until an app has paired."
+    },
+    "spotify_unlink": {
+      "name": "Unlink Spotify",
+      "description": "Forgets the linked Spotify account (the stored refresh token). Displays and apps will need to sign in again."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Nebula",
-        "description": "Panel token (the Nebula panel uses this on /api/nebula/panel, or any valid Home Assistant token):\n\n**{token}**\n\nTick to generate a new one.",
+        "description": "Panel token (the Nebula panel uses this on /api/nebula/panel, or any valid Home Assistant token):\n\n**{token}**\n\nTick to generate a new one.\n\n---\n\n**Spotify link** — lets the display and app sign in to Spotify by opening a link or scanning a QR. Create a free app at developer.spotify.com, then add this exact redirect URI to it:\n\n`{redirect_uri}`\n\nThen paste the app's Client ID and Client Secret below. Leave blank to disable.",
         "data": {
-          "regenerate": "Regenerate panel token"
+          "regenerate": "Regenerate panel token",
+          "spotify_client_id": "Spotify Client ID",
+          "spotify_client_secret": "Spotify Client Secret"
         }
       }
     }

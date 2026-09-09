@@ -14,6 +14,8 @@ Clients connect to `/api/websocket`, authenticate as normal, then:
 
 from __future__ import annotations
 
+import base64
+
 import voluptuous as vol
 
 from homeassistant.components import websocket_api
@@ -29,12 +31,19 @@ def _manager(hass: HomeAssistant):
     return None
 
 
+def _spotify(hass: HomeAssistant):
+    return hass.data.get(DOMAIN, {}).get("spotify")
+
+
 @callback
 def async_register_websocket(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_heartbeat)
     websocket_api.async_register_command(hass, ws_pair_code)
     websocket_api.async_register_command(hass, ws_call)
+    websocket_api.async_register_command(hass, ws_spotify_link)
+    websocket_api.async_register_command(hass, ws_spotify_status)
+    websocket_api.async_register_command(hass, ws_spotify_unlink)
 
 
 @websocket_api.websocket_command(
@@ -128,3 +137,83 @@ async def ws_call(hass, connection, msg) -> None:
         context=connection.context(msg),
     )
     connection.send_result(msg["id"])
+
+
+# --------------------------------------------------------------------------- #
+#  Spotify account link — drives the same broker the panel QR screen uses     #
+# --------------------------------------------------------------------------- #
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "nebula/spotify_link",
+        vol.Optional("panel", default="app"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_spotify_link(hass, connection, msg) -> None:
+    """Begin a sign-in: returns the authorize URL, a QR PNG (data URL) and the
+    flow id the app polls with `nebula/spotify_status`."""
+    link = _spotify(hass)
+    if link is None:
+        connection.send_error(msg["id"], "not_ready", "Nebula not set up")
+        return
+    started = link.begin(msg["panel"])
+    if started is None:
+        connection.send_result(
+            msg["id"],
+            {
+                "configured": link.configured,
+                "reason": "no_client"
+                if not link.configured
+                else "no_external_https_url",
+            },
+        )
+        return
+    nonce, url = started
+    qr_data_url = None
+    try:
+        from .pairing import qr_png
+
+        png = await hass.async_add_executor_job(qr_png, url)
+        qr_data_url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+    except Exception:  # noqa: BLE001
+        pass
+    connection.send_result(
+        msg["id"],
+        {"configured": True, "flow": nonce, "auth_url": url, "qr": qr_data_url},
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "nebula/spotify_status",
+        vol.Optional("flow", default=""): str,
+    }
+)
+@callback
+def ws_spotify_status(hass, connection, msg) -> None:
+    link = _spotify(hass)
+    if link is None:
+        connection.send_error(msg["id"], "not_ready", "Nebula not set up")
+        return
+    nonce = msg["flow"]
+    if nonce:
+        status = link.flow_status(nonce)
+        # the app never needs the token bundle — the panel collects that.
+        if status and status.get("bundle"):
+            status = {"state": status["state"], "linked": True}
+        connection.send_result(msg["id"], status or {"state": "expired"})
+        return
+    connection.send_result(msg["id"], link.snapshot())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "nebula/spotify_unlink"})
+@websocket_api.async_response
+async def ws_spotify_unlink(hass, connection, msg) -> None:
+    link = _spotify(hass)
+    if link is None:
+        connection.send_error(msg["id"], "not_ready", "Nebula not set up")
+        return
+    await link.async_unlink()
+    connection.send_result(msg["id"], {"ok": True})

@@ -47,6 +47,7 @@ from .device import panel_device_info
 from .manager import NebulaManager
 from .pairing import async_get_source_ip, async_lan_host_port, pair_uri
 from .panel import NebulaPanelView, PanelChannel
+from . import spotify_link
 from .websocket_api import async_register_websocket
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SENSOR,
     Platform.MEDIA_PLAYER,
+    Platform.CONVERSATION,
     Platform.TODO,
 ]
 
@@ -82,10 +84,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager.async_start()
     domain_data[entry.entry_id] = {DATA_MANAGER: manager}
 
+    # Spotify account link broker (per-entry state; HTTP surface registered once).
+    await spotify_link.async_setup(hass, entry)
+
     # HTTP + WS command surfaces are process-wide; register once.
     if not domain_data.get("_http_registered"):
         async_register_http(hass)
         async_register_websocket(hass)
+        spotify_link.async_register_http(hass)
         _async_register_services(hass)
         hass.http.register_view(NebulaPanelView(panel))
         domain_data["_http_registered"] = True
@@ -338,6 +344,15 @@ def _async_register_services(hass: HomeAssistant) -> None:
         _pair_code,
         schema=vol.Schema({}),
         supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def _spotify_unlink(_call: ServiceCall) -> None:
+        link = hass.data.get(DOMAIN, {}).get("spotify")
+        if link is not None:
+            await link.async_unlink()
+
+    hass.services.async_register(
+        DOMAIN, "spotify_unlink", _spotify_unlink, schema=vol.Schema({})
     )
 
     async def _panel_command(call: ServiceCall) -> None:

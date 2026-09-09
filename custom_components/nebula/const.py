@@ -9,6 +9,27 @@ DATA_PANEL = "panel"
 # Panel <-> integration shared secret (config-entry option; auto-generated).
 CONF_PANEL_TOKEN = "panel_token"
 
+# Spotify account link (config-entry options; entered once in the integration
+# options flow). See spotify_link.py — the "open a link / scan a QR" broker.
+CONF_SPOTIFY_CLIENT_ID = "spotify_client_id"
+CONF_SPOTIFY_CLIENT_SECRET = "spotify_client_secret"
+
+# --- conversation.nebula (voice agent) options ------------------------------
+CONF_ASSIST_ENABLED = "assist_enabled"            # bool, default True
+CONF_ASSIST_LOCAL_FIRST = "assist_local_first"    # bool, try built-in intents first
+CONF_ASSIST_FALLBACK_AGENT = "assist_fallback_agent"  # entity_id, "" = auto-detect
+CONF_ASSIST_PERSONA = "assist_persona"            # system-prompt text for the LLM
+
+DEFAULT_PERSONA = (
+    "You are Nebula, the voice of this home. Speak warmly, calmly and plainly, "
+    "like a friendly, capable house manager — never robotic, never bubbly, and "
+    "never say things like \"as an AI\". Avoid exclamation marks. Keep spoken "
+    "replies to one or two short sentences unless asked for detail. You know this "
+    "home's devices and can use tools to check weather, forecasts, the calendar "
+    "and entity states before answering. Give a concrete answer rather than "
+    "hedging; if you genuinely cannot help, say so briefly and kindly."
+)
+
 # call domains that are routed to the panel instead of Home Assistant services.
 PANEL_CALL_DOMAINS = ("panel", "media", "nebula")
 
@@ -45,6 +66,7 @@ INTERESTING_DOMAINS = CONTROLLABLE_DOMAINS + (
     "climate",
     "sensor",
     "binary_sensor",
+    "todo",
 )
 
 SIGNAL_CLIENTS_CHANGED = f"{DOMAIN}_clients_changed"
