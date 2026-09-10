@@ -41,14 +41,14 @@ class NebulaConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        return NebulaOptionsFlow(config_entry)
+        return NebulaOptionsFlow()
 
 
 class NebulaOptionsFlow(OptionsFlow):
     """Show / regenerate the panel token."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        self.config_entry = config_entry
+    # `self.config_entry` is provided by the base OptionsFlow — do not assign it
+    # (newer Home Assistant makes it a read-only property and setting it raises).
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         opts = self.config_entry.options
