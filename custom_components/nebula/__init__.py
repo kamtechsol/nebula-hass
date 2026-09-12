@@ -44,6 +44,7 @@ from .const import (
     ZEROCONF_TYPE,
 )
 from .device import panel_device_info
+from . import game_intent
 from .manager import NebulaManager
 from .pairing import async_get_source_ip, async_lan_host_port, pair_uri
 from .panel import NebulaPanelView, PanelChannel
@@ -93,6 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_register_websocket(hass)
         spotify_link.async_register_http(hass)
         _async_register_services(hass)
+        game_intent.async_register(hass)
         hass.http.register_view(NebulaPanelView(panel))
         domain_data["_http_registered"] = True
 
