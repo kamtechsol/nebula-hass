@@ -27,6 +27,7 @@ from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
     entity_registry as er,
+    issue_registry as ir,
     network,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -45,6 +46,7 @@ from .const import (
 )
 from .device import panel_device_info
 from . import game_intent
+from . import help_intent
 from .manager import NebulaManager
 from .pairing import async_get_source_ip, async_lan_host_port, pair_uri
 from .panel import NebulaPanelView, PanelChannel
@@ -73,7 +75,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.config_entries.async_update_entry(
             entry, options={**entry.options, CONF_PANEL_TOKEN: panel_token}
         )
-    _LOGGER.info("Nebula panel token: %s", panel_token)
+    # Never the full secret at INFO — HA bundles home-assistant.log into
+    # diagnostics/support exports, which would leak it wholesale.
+    _LOGGER.info("Nebula panel token: %s… (%d chars)", panel_token[:4], len(panel_token))
 
     # One process-wide panel channel.
     panel: PanelChannel = domain_data.get(DATA_PANEL) or PanelChannel(panel_token)
@@ -95,6 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         spotify_link.async_register_http(hass)
         _async_register_services(hass)
         game_intent.async_register(hass)
+        help_intent.async_register(hass)
         hass.http.register_view(NebulaPanelView(panel))
         domain_data["_http_registered"] = True
 
@@ -114,6 +119,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(_async_reload))
 
+    # Nebula OTA delivers updates to the panel / Cosmos UI devices — not a
+    # manifest `dependencies` entry (that only gates on the *component module*
+    # loading, and nebula_ota has no top-level async_setup, so it would be a
+    # silent no-op whether or not the user has actually added it). A Repairs
+    # issue is the real "red flag": visible in Settings, clears itself once
+    # Nebula OTA is configured, and never blocks Nebula Smart Home itself from
+    # loading just because updates aren't set up yet.
+    _async_check_ota_companion(hass)
+
     # Show the pairing QR on first run (until an app has actually paired), and
     # take it down again as soon as one connects.
     await _async_setup_pairing_notification(hass, entry)
@@ -125,6 +139,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _stop)
     )
     return True
+
+
+ISSUE_MISSING_OTA = "missing_nebula_ota"
+
+
+@callback
+def _async_check_ota_companion(hass: HomeAssistant) -> None:
+    """Red-flag (HA Repairs) if the Nebula OTA companion integration isn't
+    configured — devices can't check for or receive updates without it."""
+    configured = bool(hass.config_entries.async_entries("nebula_ota"))
+    if configured:
+        ir.async_delete_issue(hass, DOMAIN, ISSUE_MISSING_OTA)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        ISSUE_MISSING_OTA,
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=ISSUE_MISSING_OTA,
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -364,7 +399,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
         timer_add, timer_cancel, alarm_add, alarm_cancel, dismiss, …); every
         other field is passed through as-is. Used by voice automations that used
         to poke the panel through the now-retired HA Companion app.
+
+        This bypasses HA's normal entity/service permission model entirely (it
+        forwards straight to the panel's WebSocket, not through
+        `hass.services.async_call`'s ACL checks), so a direct call from a
+        signed-in user must be an admin. Automations/scripts carry no user
+        context at all (`context.user_id is None`) and are trusted the same
+        way they always have been — this only blocks a non-admin household
+        member's own token from pushing raw commands to the one shared panel.
         """
+        if call.context.user_id is not None:
+            user = await hass.auth.async_get_user(call.context.user_id)
+            if user is None or not user.is_admin:
+                _LOGGER.warning("nebula.panel_command: refused for non-admin caller")
+                return
         panel = hass.data.get(DOMAIN, {}).get(DATA_PANEL)
         if panel is None:
             _LOGGER.warning("nebula.panel_command: no panel channel")

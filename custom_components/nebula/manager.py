@@ -35,6 +35,8 @@ from .const import (
     CLIENT_TIMEOUT,
     DOMAIN,
     INTERESTING_DOMAINS,
+    PAIR_LOCKOUT_S,
+    PAIR_MAX_FAILS,
     PAIR_PIN_TTL,
     SIGNAL_CLIENTS_CHANGED,
 )
@@ -78,6 +80,8 @@ class NebulaManager:
         self._clients: dict[str, _Client] = {}
         self._listeners: set[Callable[[dict[str, Any]], None]] = set()
         self._pins: list[_Pin] = []
+        self._pin_fail_count = 0
+        self._pin_lockout_until = 0.0
         self._unsub_state: CALLBACK_TYPE | None = None
         self._unsubs: list[CALLBACK_TYPE] = []
         self.panel = None  # PanelChannel, set by __init__.py
@@ -263,12 +267,32 @@ class NebulaManager:
 
     @callback
     def consume_pin(self, code: str) -> str | None:
-        """Validate and burn a PIN. Returns the owning user_id, or None."""
+        """Validate and burn a PIN. Returns the owning user_id, or None.
+
+        Locks out further attempts for `PAIR_LOCKOUT_S` after
+        `PAIR_MAX_FAILS` wrong guesses in a row — a 6-digit PIN is only
+        ~1e6 possibilities, and with no limiter at all a LAN-adjacent
+        attacker could brute-force one well inside its TTL (especially the
+        30-min QR-code window) and mint themselves a 3650-day owner token.
+        """
+        now = time.monotonic()
+        if now < self._pin_lockout_until:
+            return None
         self._prune_pins()
         for pin in self._pins:
             if secrets.compare_digest(pin.code, code):
                 self._pins.remove(pin)
+                self._pin_fail_count = 0
                 return pin.user_id
+        self._pin_fail_count += 1
+        if self._pin_fail_count >= PAIR_MAX_FAILS:
+            self._pin_lockout_until = now + PAIR_LOCKOUT_S
+            self._pin_fail_count = 0
+            _LOGGER.warning(
+                "Nebula: %d failed pairing attempts — locking pairing for %ds",
+                PAIR_MAX_FAILS,
+                PAIR_LOCKOUT_S,
+            )
         return None
 
     @callback

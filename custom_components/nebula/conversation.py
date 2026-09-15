@@ -105,19 +105,32 @@ class NebulaConversationEntity(conversation.ConversationEntity):
         return str(self._opt(CONF_ASSIST_PERSONA, DEFAULT_PERSONA)).strip()
 
     def _fallback_agent(self) -> str | None:
-        """Configured fallback agent, else the first non-builtin conversation entity."""
+        """Configured fallback agent, else deliberately pick the Gemini agent.
+
+        Auto-detect used to mean "whatever non-builtin conversation entity
+        happens to exist" — fine when Google Generative AI was the only
+        option, but fragile: any other conversation-capable integration
+        (another HACS agent, a second LLM) would silently steal the fallback
+        slot just by loading first. Prefer a `google_generative_ai_conversation`
+        platform entity by name; only fall back to "first other agent found"
+        if no Gemini entity exists.
+        """
         configured = self._opt(CONF_ASSIST_FALLBACK_AGENT, "")
         if configured:
             return configured
+
         ent_reg = er.async_get(self.hass)
-        for ent in ent_reg.entities.values():
-            if (
-                ent.domain == "conversation"
-                and ent.entity_id not in (BUILTIN_AGENT, self.entity_id)
-                and not ent.disabled
-            ):
+        candidates = [
+            ent
+            for ent in ent_reg.entities.values()
+            if ent.domain == "conversation"
+            and ent.entity_id not in (BUILTIN_AGENT, self.entity_id)
+            and not ent.disabled
+        ]
+        for ent in candidates:
+            if ent.platform == "google_generative_ai_conversation":
                 return ent.entity_id
-        return None
+        return candidates[0].entity_id if candidates else None
 
     # ---------------------------------------------------------------- process
 

@@ -32,5 +32,11 @@
         }
       }
     }
+  },
+  "issues": {
+    "missing_nebula_ota": {
+      "title": "Nebula OTA isn't set up",
+      "description": "Nebula Smart Home uses the **Nebula OTA** integration to deliver software updates to the panel and Cosmos UI devices — without it, devices can't check for or receive updates.\n\nGo to Settings → Devices & services → Add integration → search for **Nebula OTA**, then set it up (point it at your builds directory). This warning clears automatically once it's configured."
+    }
   }
 }

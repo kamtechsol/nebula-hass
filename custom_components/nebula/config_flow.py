@@ -15,11 +15,17 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import selector
 
 from .const import (
+    CONF_ASSIST_ENABLED,
+    CONF_ASSIST_FALLBACK_AGENT,
+    CONF_ASSIST_LOCAL_FIRST,
+    CONF_ASSIST_PERSONA,
     CONF_PANEL_TOKEN,
     CONF_SPOTIFY_CLIENT_ID,
     CONF_SPOTIFY_CLIENT_SECRET,
+    DEFAULT_PERSONA,
     DOMAIN,
 )
 
@@ -68,6 +74,14 @@ class NebulaOptionsFlow(OptionsFlow):
                     CONF_SPOTIFY_CLIENT_SECRET: (
                         user_input.get(CONF_SPOTIFY_CLIENT_SECRET) or ""
                     ).strip(),
+                    CONF_ASSIST_ENABLED: user_input.get(CONF_ASSIST_ENABLED, True),
+                    CONF_ASSIST_LOCAL_FIRST: user_input.get(CONF_ASSIST_LOCAL_FIRST, True),
+                    CONF_ASSIST_FALLBACK_AGENT: (
+                        user_input.get(CONF_ASSIST_FALLBACK_AGENT) or ""
+                    ).strip(),
+                    CONF_ASSIST_PERSONA: (
+                        user_input.get(CONF_ASSIST_PERSONA) or DEFAULT_PERSONA
+                    ).strip(),
                 },
             )
 
@@ -94,6 +108,24 @@ class NebulaOptionsFlow(OptionsFlow):
                         CONF_SPOTIFY_CLIENT_SECRET,
                         default=opts.get(CONF_SPOTIFY_CLIENT_SECRET, ""),
                     ): str,
+                    vol.Optional(
+                        CONF_ASSIST_ENABLED,
+                        default=opts.get(CONF_ASSIST_ENABLED, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ASSIST_LOCAL_FIRST,
+                        default=opts.get(CONF_ASSIST_LOCAL_FIRST, True),
+                    ): bool,
+                    vol.Optional(
+                        CONF_ASSIST_FALLBACK_AGENT,
+                        default=opts.get(CONF_ASSIST_FALLBACK_AGENT, ""),
+                    ): selector.selector(
+                        {"entity": {"domain": "conversation"}}
+                    ),
+                    vol.Optional(
+                        CONF_ASSIST_PERSONA,
+                        default=opts.get(CONF_ASSIST_PERSONA, DEFAULT_PERSONA),
+                    ): selector.selector({"text": {"multiline": True}}),
                 }
             ),
             description_placeholders={

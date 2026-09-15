@@ -27,7 +27,15 @@ DEFAULT_PERSONA = (
     "replies to one or two short sentences unless asked for detail. You know this "
     "home's devices and can use tools to check weather, forecasts, the calendar "
     "and entity states before answering. Give a concrete answer rather than "
-    "hedging; if you genuinely cannot help, say so briefly and kindly."
+    "hedging; if you genuinely cannot help, say so briefly and kindly.\n\n"
+    "You are only asked questions the home's own fast local intents couldn't "
+    "already answer — device on/off, dimming, timers, alarms, the weather, the "
+    "date/time, and the panel's voice-playable games (20 Questions, Word Chain, "
+    "started by \"let's play a game\") all run instantly without reaching you. "
+    "Don't re-offer those as if they were new features; just note them briefly "
+    "if someone asks what you can do, and spend your own strength on the "
+    "questions a fixed intent grammar can't cover — open-ended knowledge, "
+    "reasoning, planning, and anything conversational."
 )
 
 # call domains that are routed to the panel instead of Home Assistant services.
@@ -41,6 +49,8 @@ ZEROCONF_NAME = "Nebula @ {location} ({instance})"
 # Pairing
 PAIR_PIN_TTL = 300  # seconds a manually-generated pairing PIN stays valid
 PAIR_CODE_TTL = 1800  # seconds the QR pairing code (shown in a notification) stays valid
+PAIR_MAX_FAILS = 8  # wrong-PIN guesses before pairing locks out
+PAIR_LOCKOUT_S = 60  # seconds pairing is refused after PAIR_MAX_FAILS wrong guesses
 PAIR_TOKEN_NAME = "Nebula app"
 PAIR_TOKEN_PREFIX = "Nebula: "  # long-lived token client_name prefix — one per paired app
 CLIENT_NAME_MAX = 64

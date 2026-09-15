@@ -37,7 +37,7 @@ from urllib.parse import urlencode
 
 from aiohttp import web
 
-from homeassistant.components.http import KEY_HASS_USER, HomeAssistantView
+from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import network
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -480,7 +480,13 @@ class SpotifyStatusView(HomeAssistantView):
         if link is None:
             return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
 
-        authed = _panel_authorised(hass, request) or (request.get(KEY_HASS_USER) is not None)
+        # Panel-token only — NOT "any signed-in HA user" — same restriction the
+        # WS command (ws_spotify_status) already enforces ("the app never needs
+        # the token bundle"). This used to also accept a bare HA user auth,
+        # which meant it never actually applied since every request here comes
+        # from an authenticated HA session; any paired non-admin user could
+        # pull a durable Spotify refresh token with no panel-token needed.
+        authed = _panel_authorised(hass, request)
         nonce = request.query.get("flow", "")
 
         if nonce:

@@ -8,6 +8,7 @@ the integration sends media commands down. Nothing connects *to* the panel.
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from collections.abc import Callable
 from typing import Any
@@ -125,13 +126,18 @@ class PanelChannel:
         return ws
 
     async def _authorized(self, request: web.Request) -> bool:
-        """Accept the panel token, OR any valid Home Assistant access token — so
-        a panel that already has HA credentials (for voice) needs no extra setup."""
+        """Accept the panel token, or an *admin's* Home Assistant access token —
+        so a panel that already has HA credentials (for voice) needs no extra
+        setup. Deliberately NOT any authenticated user: this endpoint becomes
+        "the panel" (every other client's commands + the device_id/welcome
+        frame) for whoever opens it, so a non-admin household member's own
+        token must not be enough to hijack it.
+        """
         tok = request.query.get("token") or ""
         if not tok:
             auth = request.headers.get("Authorization", "")
             tok = auth[7:] if auth.startswith("Bearer ") else ""
-        if tok and self._token and tok == self._token:
+        if tok and self._token and secrets.compare_digest(tok, self._token):
             return True
         hass = request.app["hass"]
         try:
@@ -140,7 +146,7 @@ class PanelChannel:
                 result = await result
         except Exception:  # noqa: BLE001
             result = None
-        return result is not None
+        return bool(result and result.user and result.user.is_admin)
 
     def _on_message(self, msg: dict[str, Any]) -> None:
         self._last_seen = time.monotonic()
