@@ -23,6 +23,7 @@ from .const import (
     CONF_ASSIST_LOCAL_FIRST,
     CONF_ASSIST_PERSONA,
     CONF_PANEL_TOKEN,
+    CONF_SEARCH_API_KEY,
     CONF_SPOTIFY_CLIENT_ID,
     CONF_SPOTIFY_CLIENT_SECRET,
     DEFAULT_PERSONA,
@@ -82,6 +83,9 @@ class NebulaOptionsFlow(OptionsFlow):
                     CONF_ASSIST_PERSONA: (
                         user_input.get(CONF_ASSIST_PERSONA) or DEFAULT_PERSONA
                     ).strip(),
+                    CONF_SEARCH_API_KEY: (
+                        user_input.get(CONF_SEARCH_API_KEY) or ""
+                    ).strip(),
                 },
             )
 
@@ -126,6 +130,13 @@ class NebulaOptionsFlow(OptionsFlow):
                         CONF_ASSIST_PERSONA,
                         default=opts.get(CONF_ASSIST_PERSONA, DEFAULT_PERSONA),
                     ): selector.selector({"text": {"multiline": True}}),
+                    # Brave Search API key for Assist's on-screen search-result
+                    # cards (see search_intent.py) — blank disables the feature
+                    # entirely and general-knowledge questions stay voice-only.
+                    vol.Optional(
+                        CONF_SEARCH_API_KEY,
+                        default=opts.get(CONF_SEARCH_API_KEY, ""),
+                    ): str,
                 }
             ),
             description_placeholders={

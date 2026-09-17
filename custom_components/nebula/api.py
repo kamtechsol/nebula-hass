@@ -1,9 +1,10 @@
 """HTTP surface for Nebula.
 
-* GET  /api/nebula/snapshot   (HA auth)  - the combined Home/Scenes/Automations picture
-* GET  /api/nebula/clients    (HA auth)  - who is currently connected
-* POST /api/nebula/pair       (no auth)  - exchange a single-use PIN for a long-lived token
-* GET  /api/nebula/pair_qr    (no auth)  - PNG QR of the live pairing code (404 if none)
+* GET  /api/nebula/snapshot          (HA auth)  - the combined Home/Scenes/Automations picture
+* GET  /api/nebula/clients           (HA auth)  - who is currently connected
+* POST /api/nebula/pair              (no auth)  - exchange a single-use PIN for a long-lived token
+* GET  /api/nebula/pair_qr           (no auth)  - PNG QR of the live pairing code (404 if none)
+* POST /api/nebula/reminders/sync    (HA auth)  - replace the app-synced reminders batch
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from homeassistant.components.http import KEY_HASS_USER, HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
-from .const import CLIENT_NAME_MAX, DATA_MANAGER, DOMAIN
+from .const import CLIENT_NAME_MAX, DATA_MANAGER, DATA_REMINDERS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,11 +34,19 @@ def _manager(hass: HomeAssistant):
     return None
 
 
+def _reminders_entity(hass: HomeAssistant):
+    for data in hass.data.get(DOMAIN, {}).values():
+        if isinstance(data, dict) and DATA_REMINDERS in data:
+            return data[DATA_REMINDERS]
+    return None
+
+
 def async_register_http(hass: HomeAssistant) -> None:
     hass.http.register_view(NebulaSnapshotView())
     hass.http.register_view(NebulaClientsView())
     hass.http.register_view(NebulaPairView())
     hass.http.register_view(NebulaPairQRView())
+    hass.http.register_view(NebulaRemindersSyncView())
 
 
 class NebulaSnapshotView(HomeAssistantView):
@@ -186,3 +195,44 @@ class NebulaPairQRView(HomeAssistantView):
             content_type="image/png",
             headers={"Cache-Control": "no-store"},
         )
+
+
+class NebulaRemindersSyncView(HomeAssistantView):
+    """Replace the app-synced slice of `todo.nebula_reminders` in one shot.
+
+    Called by the phone app after it reads the user's iOS EventKit (iCloud/
+    Google/Outlook, whatever they've added in Settings -> Calendar). One-way
+    and idempotent: every item here is keyed by its own `external_id`, so a
+    re-sync updates in place; anything not in the batch that was previously
+    external gets dropped (the source item was deleted/completed on the
+    phone). Items added by voice or on the panel are untouched either way.
+    """
+
+    url = "/api/nebula/reminders/sync"
+    name = "api:nebula:reminders:sync"
+    requires_auth = True
+
+    _item_schema = vol.Schema(
+        {
+            vol.Required("external_id"): cv.string,
+            vol.Required("summary"): cv.string,
+            vol.Optional("due"): vol.Any(cv.string, None),
+            vol.Optional("description"): vol.Any(cv.string, None),
+        },
+        extra=vol.ALLOW_EXTRA,
+    )
+    _schema = vol.Schema({vol.Required("items"): [_item_schema]})
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        entity = _reminders_entity(hass)
+        if entity is None:
+            return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
+
+        try:
+            body = self._schema(await request.json())
+        except (vol.Invalid, ValueError):
+            return self.json_message("Bad request", HTTPStatus.BAD_REQUEST)
+
+        result = await entity.async_sync_external(body["items"])
+        return self.json(result)

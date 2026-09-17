@@ -5,6 +5,7 @@ DOMAIN = "nebula"
 # Data stored on hass.data[DOMAIN]
 DATA_MANAGER = "manager"
 DATA_PANEL = "panel"
+DATA_REMINDERS = "reminders"
 
 # Panel <-> integration shared secret (config-entry option; auto-generated).
 CONF_PANEL_TOKEN = "panel_token"
@@ -19,6 +20,7 @@ CONF_ASSIST_ENABLED = "assist_enabled"            # bool, default True
 CONF_ASSIST_LOCAL_FIRST = "assist_local_first"    # bool, try built-in intents first
 CONF_ASSIST_FALLBACK_AGENT = "assist_fallback_agent"  # entity_id, "" = auto-detect
 CONF_ASSIST_PERSONA = "assist_persona"            # system-prompt text for the LLM
+CONF_SEARCH_API_KEY = "search_api_key"            # Brave Search API key, "" = disabled
 
 DEFAULT_PERSONA = (
     "You are Nebula, the voice of this home. Speak warmly, calmly and plainly, "

@@ -23,6 +23,7 @@ pipeline's conversation agent at this entity.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 import re
 
@@ -32,12 +33,15 @@ from homeassistant.const import MATCH_ALL
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er, intent
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
+from . import search_intent
 from .const import (
     CONF_ASSIST_ENABLED,
     CONF_ASSIST_FALLBACK_AGENT,
     CONF_ASSIST_LOCAL_FIRST,
     CONF_ASSIST_PERSONA,
+    CONF_SEARCH_API_KEY,
     DEFAULT_PERSONA,
     DOMAIN,
 )
@@ -64,6 +68,54 @@ _FILLER = re.compile(
     r"^\s*(as an ai(?: language model)?|i'?m (?:just|only) an ai|i am an ai)[,:]?\s*",
     re.IGNORECASE,
 )
+
+# Nebula Assist visual responses (see os/COSMOS-UI.md-style plan: "Nebula
+# Assist — Visual Response Screens") — cheap regex classification on the raw
+# transcript, done here rather than on the panel, since this is the one place
+# that already knows which agent is about to answer (or just answered).
+_GREETING = re.compile(
+    r"^\s*(hi|hey|hello|yo|good (morning|afternoon|evening|night)|"
+    r"how(’|'| a)re you|how(’|'| i)s it going|what'?s up|"
+    r"thank(s| you)( (very|so) much)?|you'?re welcome|"
+    r"good (boy|girl|job)|who are you)\b",
+    re.IGNORECASE,
+)
+_WEATHER = re.compile(
+    r"\b(weather|forecast|temperature|rain(ing|y)?|snow(ing|y)?|sunny|cloudy|"
+    r"windy|humid(ity)?|how (hot|cold|warm) is it|"
+    r"is it (going to|gonna) (rain|snow))\b",
+    re.IGNORECASE,
+)
+
+
+def _attach_screen(response: intent.IntentResponse, screen: dict) -> None:
+    """Patch this specific response instance so its as_dict() also carries a
+    `nebula_screen` directive for the panel. Response objects here are built
+    by whichever agent actually answered the turn (the built-in agent for
+    weather, the fallback LLM for search/greeting) — there's no single
+    construction point in this class to subclass IntentResponse at, so the
+    instance's own as_dict is wrapped instead.
+    """
+    original_as_dict = response.as_dict
+
+    def _as_dict_with_screen():
+        d = original_as_dict()
+        d.setdefault("data", {})["nebula_screen"] = screen
+        return d
+
+    response.as_dict = _as_dict_with_screen  # type: ignore[method-assign]
+
+
+def _day_label(iso: str | None) -> str:
+    if not iso:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if parsed.date() == dt_util.now().date():
+        return "Today"
+    return parsed.strftime("%a")
 
 
 async def async_setup_entry(
@@ -143,10 +195,14 @@ class NebulaConversationEntity(conversation.ConversationEntity):
 
         local_first = bool(self._opt(CONF_ASSIST_LOCAL_FIRST, True))
 
-        # 1) built-in intent agent
+        # 1) built-in intent agent — device commands and "what's the weather"
+        # both answer here. A weather match gets a real forecast screen
+        # attached; anything else (a device command) is untouched, voice-only.
         if local_first:
             local = await self._converse(user_input, BUILTIN_AGENT)
             if local is not None and not self._should_fall_through(local):
+                if not self._is_error(local) and _WEATHER.search(text):
+                    await self._attach_weather_screen(local)
                 return local
 
         # 2) fallback LLM with the Nebula persona
@@ -155,19 +211,101 @@ class NebulaConversationEntity(conversation.ConversationEntity):
             _LOGGER.warning("Nebula: no fallback conversation agent available")
             return self._degraded(user_input)
 
-        llm = await self._converse(user_input, agent, persona=self._persona())
-        if llm is not None and not self._is_error(llm):
+        # 2a) small talk — a client-side-only animation, no backend call
+        # beyond the normal Gemini reply itself.
+        if _GREETING.search(text):
+            llm = await self._converse_with_retry(user_input, agent)
+            if llm is not None:
+                _attach_screen(llm.response, {"v": 1, "type": "greeting"})
+                return self._polish(llm)
+            return self._degraded(user_input)
+
+        # 2b) general knowledge / search bucket by elimination. Real search +
+        # image fetch, summarized into a single string used as BOTH the
+        # spoken reply and the on-screen description — see search_intent.py.
+        # Falls through to the normal free-form answer below on any failure
+        # (no API key configured, search error, no validated images).
+        api_key = self._opt(CONF_SEARCH_API_KEY, "")
+        screen = await search_intent.async_build_search_screen(
+            self.hass, text, api_key=api_key, agent_id=agent, persona=self._persona()
+        )
+        if screen is not None:
+            resp = intent.IntentResponse(language=user_input.language or "en")
+            resp.async_set_speech(screen["description"])
+            _attach_screen(resp, screen)
+            return conversation.ConversationResult(
+                response=resp, conversation_id=user_input.conversation_id
+            )
+
+        # 2c) plain free-form answer, exactly as before this feature existed.
+        llm = await self._converse_with_retry(user_input, agent)
+        if llm is not None:
             return self._polish(llm)
 
-        # 2b) one retry on a transient overload
+        return self._degraded(user_input)
+
+    async def _converse_with_retry(
+        self, user_input: conversation.ConversationInput, agent: str
+    ) -> conversation.ConversationResult | None:
+        """The fallback-agent call plus the one-retry-on-transient-overload
+        behavior, factored out since three call sites need it identically."""
+        llm = await self._converse(user_input, agent, persona=self._persona())
+        if llm is not None and not self._is_error(llm):
+            return llm
         if llm is not None and self._is_retryable(llm):
             _LOGGER.info("Nebula: fallback agent busy, retrying once")
             await asyncio.sleep(1.5)
             llm = await self._converse(user_input, agent, persona=self._persona())
             if llm is not None and not self._is_error(llm):
-                return self._polish(llm)
+                return llm
+        return None
 
-        return self._degraded(user_input)
+    async def _attach_weather_screen(
+        self, result: conversation.ConversationResult
+    ) -> None:
+        """Best-effort: pull real multi-day forecast data and attach it as a
+        `weather` screen directive. Never raises — a failure here should
+        never break the weather answer itself, just leave it voice-only."""
+        try:
+            entity_ids = self.hass.states.async_entity_ids("weather")
+            if not entity_ids:
+                return
+            entity_id = entity_ids[0]
+            forecast = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"type": "daily"},
+                target={"entity_id": entity_id},
+                blocking=True,
+                return_response=True,
+            )
+            raw_days = ((forecast or {}).get(entity_id) or {}).get("forecast") or []
+            if not raw_days:
+                return
+            state = self.hass.states.get(entity_id)
+            unit = (state.attributes.get("temperature_unit") if state else None) or "°F"
+            days = [
+                {
+                    "label": _day_label(d.get("datetime")),
+                    "condition": d.get("condition") or "unknown",
+                    "hi": round(d["temperature"]) if d.get("temperature") is not None else None,
+                    "lo": round(d["templow"]) if d.get("templow") is not None else None,
+                    "precip_pct": d.get("precipitation_probability"),
+                }
+                for d in raw_days[:7]
+            ]
+            screen = {
+                "v": 1,
+                "type": "weather",
+                "entity_id": entity_id,
+                "location": (state.attributes.get("friendly_name") if state else None)
+                or "Home",
+                "unit": "F" if "F" in unit else "C",
+                "days": days,
+            }
+            _attach_screen(result.response, screen)
+        except Exception:  # noqa: BLE001 - best effort only
+            _LOGGER.exception("Nebula: couldn't attach weather screen")
 
     # ---------------------------------------------------------------- helpers
 

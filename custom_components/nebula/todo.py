@@ -22,8 +22,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN
+from .const import DATA_REMINDERS, DOMAIN
 from .device import panel_device_info
+from .reminders import NebulaReminders
+from .reminders import STORAGE_KEY as REMINDERS_STORAGE_KEY
+from .reminders import STORAGE_VERSION as REMINDERS_STORAGE_VERSION
+from .reminders import _expose_to_conversation as _expose_reminders_to_conversation
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.shopping_list"
@@ -40,10 +44,25 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     store: Store[list[dict[str, Any]]] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-    entity = NebulaShoppingList(entry, store)
-    await entity.async_load()
-    async_add_entities([entity])
+    shopping = NebulaShoppingList(entry, store)
+    await shopping.async_load()
+
+    # Reminders (reminders.py) share this same "todo" platform-forward slot --
+    # HA loads exactly one <domain>/todo.py per config entry, so a second file
+    # of entities has to be wired in from here rather than being auto-found.
+    reminders_store: Store[list[dict[str, Any]]] = Store(
+        hass, REMINDERS_STORAGE_VERSION, REMINDERS_STORAGE_KEY
+    )
+    reminders = NebulaReminders(entry, reminders_store)
+    await reminders.async_load()
+
+    async_add_entities([shopping, reminders])
     _expose_to_conversation(hass, entry)
+    _expose_reminders_to_conversation(hass, entry)
+    # __init__.py already seeded hass.data[DOMAIN][entry.entry_id] with
+    # DATA_MANAGER before forwarding platforms; add DATA_REMINDERS into that
+    # same per-entry dict so api.py's sync view can reach this entity.
+    hass.data[DOMAIN][entry.entry_id][DATA_REMINDERS] = reminders
 
 
 class NebulaShoppingList(TodoListEntity):
