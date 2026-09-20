@@ -39,7 +39,7 @@ from homeassistant.helpers import entity_registry as er, intent
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import multi_intent, search_intent
+from . import multi_intent, search_intent, spotify_transfer
 from .const import (
     CONF_ASSIST_ENABLED,
     CONF_ASSIST_FALLBACK_AGENT,
@@ -198,6 +198,21 @@ class NebulaConversationEntity(conversation.ConversationEntity):
             return self._say(user_input, "I didn't catch that.")
 
         local_first = bool(self._opt(CONF_ASSIST_LOCAL_FIRST, True))
+
+        # 0) Spotify Connect handoff — "move the music to the void" for a
+        # zone that doesn't expose a working media_player intent through HA
+        # at all (confirmed against "the void" this session) but does
+        # register as a real Spotify Connect device via its C4 bridge. Must
+        # run BEFORE the built-in agent ever sees the raw sentence: HA's own
+        # agent tries to resolve "the void"/"the kitchen roku" as an
+        # HA area or entity name, fails, and returns a non-error "sorry, I
+        # don't see X" action_done response instead of falling through —
+        # confirmed via live testing this session — which would otherwise
+        # swallow the phrase before step 2b below ever ran. Cheap
+        # regex-gated, no LLM call. See spotify_transfer.py.
+        handoff = await spotify_transfer.async_maybe_handoff(self.hass, text)
+        if handoff is not None:
+            return self._say(user_input, handoff)
 
         # 1) built-in intent agent — device commands and "what's the weather"
         # both answer here. A weather match gets a real forecast screen
