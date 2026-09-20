@@ -5,7 +5,10 @@
 1. **Local first.** Every turn is offered to Home Assistant's built-in intent
    agent. If it can act (turn on/off, set, scene, timer, exposed-entity state,
    "what's the weather") the reply comes straight back — fast, offline,
-   deterministic. Device control never waits on the cloud.
+   deterministic. Device control never waits on the cloud. A sentence naming
+   multiple commands at once ("turn on the lights and play some jazz") is
+   split and run back through this same built-in agent, one clause at a
+   time — see `multi_intent.py`.
 
 2. **Hand off for everything else.** Forecasts, general knowledge, "is it gonna
    rain tomorrow", semi-personal questions — anything the built-in agent can't
@@ -23,6 +26,7 @@ pipeline's conversation agent at this entity.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from datetime import datetime
 import logging
 import re
@@ -30,12 +34,12 @@ import re
 from homeassistant.components import conversation
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import MATCH_ALL
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers import entity_registry as er, intent
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from . import search_intent
+from . import multi_intent, search_intent
 from .const import (
     CONF_ASSIST_ENABLED,
     CONF_ASSIST_FALLBACK_AGENT,
@@ -220,7 +224,19 @@ class NebulaConversationEntity(conversation.ConversationEntity):
                 return self._polish(llm)
             return self._degraded(user_input)
 
-        # 2b) general knowledge / search bucket by elimination. Real search +
+        # 2b) compound multi-intent commands — "turn on the lights and play
+        # jazz" names two separate device commands in one sentence; the
+        # built-in agent only ever matches one sentence template per turn.
+        # Split (LLM, gated by a cheap regex pre-filter so plain single
+        # commands never pay for this) and run each piece back through that
+        # SAME built-in agent — see multi_intent.py. Returns None whenever
+        # this wasn't actually a compound command, so it falls through to
+        # the normal search/general-answer handling below untouched.
+        compound = await self._run_compound_command(user_input, agent, text)
+        if compound is not None:
+            return compound
+
+        # 2c) general knowledge / search bucket by elimination. Real search +
         # image fetch, summarized into a single string used as BOTH the
         # spoken reply and the on-screen description — see search_intent.py.
         # Falls through to the normal free-form answer below on any failure
@@ -237,7 +253,7 @@ class NebulaConversationEntity(conversation.ConversationEntity):
                 response=resp, conversation_id=user_input.conversation_id
             )
 
-        # 2c) plain free-form answer, exactly as before this feature existed.
+        # 2d) plain free-form answer, exactly as before this feature existed.
         llm = await self._converse_with_retry(user_input, agent)
         if llm is not None:
             return self._polish(llm)
@@ -259,6 +275,103 @@ class NebulaConversationEntity(conversation.ConversationEntity):
             if llm is not None and not self._is_error(llm):
                 return llm
         return None
+
+    async def _run_compound_command(
+        self, user_input: conversation.ConversationInput, agent: str, text: str
+    ) -> conversation.ConversationResult | None:
+        """If `text` names multiple device/media commands in one sentence,
+        run each through the SAME resolution chain a single command would
+        get — built-in agent first, then the fallback LLM agent (which
+        often has its own tool-calling and can resolve things the rigid
+        built-in grammar can't, e.g. area-ambiguous targets) — and combine
+        into one result. Earlier versions only ever tried the built-in
+        agent per clause, which made every clause that the built-in grammar
+        couldn't directly resolve fail even when a standalone call with the
+        exact same text would have succeeded via the fallback agent;
+        confirmed by comparing "turn on the lights" dispatched here (failed)
+        against the identical text called standalone (resolved fine via
+        fallback). Returns None only if this isn't actually a compound
+        command at all (the split itself found fewer than 2 real commands),
+        so the caller continues to the normal single-command/conversational
+        path. If every split piece genuinely fails even after the fallback
+        attempt, that's reported as an honest failure here rather than
+        silently falling through to a plain LLM answer for the WHOLE
+        original sentence that might confidently narrate a success that
+        never happened (the failure mode this was built to catch — see the
+        "the void" test in this feature's rollout notes)."""
+        parts = await multi_intent.async_split_compound_command(self.hass, text, agent)
+        if not parts:
+            return None
+
+        spoken: list[str] = []
+        failed: list[str] = []
+        for part in parts:
+            # Fresh conversation_id per clause so these look like independent
+            # utterances rather than a continuation of one another; the real
+            # user_input.context is kept as-is (its user_id matters for
+            # entity-exposure/target resolution).
+            sub_input = dataclasses.replace(user_input, text=part, conversation_id=None)
+            sub_result = await self._converse(sub_input, BUILTIN_AGENT)
+            if (
+                sub_result is None
+                or self._should_fall_through(sub_result)
+                or self._is_error(sub_result)
+            ):
+                # Built-in grammar couldn't resolve this clause on its own —
+                # give it the same fallback-agent chance a standalone
+                # command would get, instead of giving up immediately.
+                sub_result = await self._converse_with_retry(sub_input, agent)
+                if sub_result is None:
+                    failed.append(part)
+                    continue
+            sub_speech = (sub_result.response.speech or {}).get("plain", {}).get("speech")
+            if isinstance(sub_speech, str) and sub_speech.strip():
+                spoken.append(sub_speech.strip())
+            sub_failed = (sub_result.response.as_dict().get("data") or {}).get("failed")
+            if sub_failed:
+                failed.append(part)
+
+        # Whether anything actually succeeded — distinct from whether
+        # anything had speech to say (a silent "turn on X" success has no
+        # speech but must not be mistaken for a failure).
+        any_succeeded = len(failed) < len(parts)
+
+        resp = intent.IntentResponse(language=user_input.language or "en")
+        message = list(spoken)
+        if failed:
+            # Always mention a failure verbally, even if a successful clause
+            # already had its own speech — silence would otherwise be the
+            # only signal something didn't work.
+            message.append(
+                "I couldn't do that"
+                if len(failed) == 1
+                else f"I couldn't do {len(failed)} of those"
+            )
+        if any_succeeded:
+            resp.response_type = intent.IntentResponseType.ACTION_DONE
+        else:
+            # Nothing succeeded at all — report it honestly instead of
+            # falling through to a plain answer that might narrate a false
+            # success (the specific gap this branch closes).
+            resp.response_type = intent.IntentResponseType.ERROR
+            resp.error_code = intent.IntentResponseErrorCode.FAILED_TO_HANDLE
+            if not message:
+                message = ["I couldn't do any of that."]
+        resp.async_set_speech(" ".join(message))
+
+        original_as_dict = resp.as_dict
+
+        def _as_dict_with_failed():
+            d = original_as_dict()
+            if failed:
+                d.setdefault("data", {})["failed"] = failed
+            return d
+
+        resp.as_dict = _as_dict_with_failed  # type: ignore[method-assign]
+
+        return conversation.ConversationResult(
+            response=resp, conversation_id=user_input.conversation_id
+        )
 
     async def _attach_weather_screen(
         self, result: conversation.ConversationResult
