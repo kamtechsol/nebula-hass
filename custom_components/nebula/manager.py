@@ -71,6 +71,13 @@ class _Pin:
     ttl: float = PAIR_PIN_TTL
 
 
+@dataclass
+class _Relay:
+    payload: dict[str, Any]
+    created: float
+    ttl: float = 120.0
+
+
 class NebulaManager:
     """Tracks subscribers, builds snapshots, brokers pairing PINs."""
 
@@ -82,6 +89,7 @@ class NebulaManager:
         self._pins: list[_Pin] = []
         self._pin_fail_count = 0
         self._pin_lockout_until = 0.0
+        self._relays: dict[str, _Relay] = {}
         self._unsub_state: CALLBACK_TYPE | None = None
         self._unsubs: list[CALLBACK_TYPE] = []
         self.panel = None  # PanelChannel, set by __init__.py
@@ -299,6 +307,37 @@ class NebulaManager:
     def _prune_pins(self) -> None:
         now = time.monotonic()
         self._pins = [p for p in self._pins if now - p.created < p.ttl]
+
+    # ------------------------------------------------------------------ pairing relay
+    #
+    # Fallback transport for `bind_ha`: on a network with Wi-Fi client/AP
+    # isolation, the phone can reach Home Assistant but not the panel
+    # directly (that's what isolation is *for* — it doesn't carve out an
+    # exception for this app). Both sides can already reach HA, so route the
+    # hand-off through here instead: the phone drops the payload keyed by a
+    # session id it got from the QR, the panel polls for it by that same id.
+    # This mailbox is just a relay — it doesn't re-derive any trust of its
+    # own. The session id came from a QR only the panel generated, and the
+    # panel independently re-validates the PIN inside the payload against
+    # its own live PairingPin before binding anything, exactly as it does
+    # for a direct `/cmd` POST.
+
+    @callback
+    def relay_put(self, session: str, payload: dict[str, Any]) -> None:
+        self._prune_relays()
+        self._relays[session] = _Relay(payload=payload, created=time.monotonic())
+
+    @callback
+    def relay_take(self, session: str) -> dict[str, Any] | None:
+        """Pop (single-use) the mailbox entry for `session`, or None."""
+        self._prune_relays()
+        relay = self._relays.pop(session, None)
+        return relay.payload if relay else None
+
+    @callback
+    def _prune_relays(self) -> None:
+        now = time.monotonic()
+        self._relays = {k: v for k, v in self._relays.items() if now - v.created < v.ttl}
 
     # ------------------------------------------------------------------ state
 

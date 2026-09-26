@@ -5,6 +5,8 @@
 * POST /api/nebula/pair              (no auth)  - exchange a single-use PIN for a long-lived token
 * GET  /api/nebula/pair_qr           (no auth)  - PNG QR of the live pairing code (404 if none)
 * POST /api/nebula/reminders/sync    (HA auth)  - replace the app-synced reminders batch
+* POST /api/nebula/relay_put/{id}    (HA auth)  - phone: drop a bind_ha payload for a panel to pick up
+* GET  /api/nebula/relay_poll/{id}   (no auth)  - panel: pop the payload dropped for its session id
 """
 
 from __future__ import annotations
@@ -47,6 +49,8 @@ def async_register_http(hass: HomeAssistant) -> None:
     hass.http.register_view(NebulaPairView())
     hass.http.register_view(NebulaPairQRView())
     hass.http.register_view(NebulaRemindersSyncView())
+    hass.http.register_view(NebulaRelayPutView())
+    hass.http.register_view(NebulaRelayPollView())
 
 
 class NebulaSnapshotView(HomeAssistantView):
@@ -195,6 +199,67 @@ class NebulaPairQRView(HomeAssistantView):
             content_type="image/png",
             headers={"Cache-Control": "no-store"},
         )
+
+
+class NebulaRelayPutView(HomeAssistantView):
+    """Phone leg of the pairing relay — fallback transport for `bind_ha`
+    when Wi-Fi client/AP isolation blocks the phone from reaching the panel
+    directly (isolation still lets both sides reach *this* server). Drops
+    the same payload the phone would otherwise have POSTed straight to the
+    panel's `/cmd`, keyed by the session id from the panel's own QR, for
+    NebulaRelayPollView (below) to hand off. Overwriting on a retry is fine
+    — single mailbox slot per session, last write wins.
+    """
+
+    url = "/api/nebula/relay_put/{session}"
+    name = "api:nebula:relay_put"
+    requires_auth = True
+
+    _schema = vol.Schema(
+        {
+            vol.Required("pin"): cv.string,
+            vol.Required("ha_url"): cv.string,
+            vol.Required("ha_token"): cv.string,
+            vol.Optional("owner_name", default=""): cv.string,
+        }
+    )
+
+    async def post(self, request: web.Request, session: str) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        manager = _manager(hass)
+        if manager is None:
+            return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
+        try:
+            body = self._schema(await request.json())
+        except (vol.Invalid, ValueError):
+            return self.json_message("Bad request", HTTPStatus.BAD_REQUEST)
+        manager.relay_put(session, body)
+        return self.json({"ok": True})
+
+
+class NebulaRelayPollView(HomeAssistantView):
+    """Panel leg of the pairing relay. Unauthenticated — the session id
+    (from a QR only the panel itself generated) is the only thing gating
+    this, the same trust boundary as the pairing PIN sitting next to it on
+    screen. That's enough: whatever this returns still has to pass the
+    panel's own `PairingPin.isValid()` check before anything actually
+    binds, exactly like a direct `/cmd` POST would. Single-use — a second
+    poll for the same session 404s just like an already-consumed PIN would.
+    """
+
+    url = "/api/nebula/relay_poll/{session}"
+    name = "api:nebula:relay_poll"
+    requires_auth = False
+
+    async def get(self, request: web.Request, session: str) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        manager = _manager(hass)
+        if manager is None:
+            return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
+        payload = manager.relay_take(session)
+        if payload is None:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        return self.json(payload)
 
 
 class NebulaRemindersSyncView(HomeAssistantView):
