@@ -334,7 +334,11 @@ class SpotifyLink:
         return self._bundle(access, remaining)
 
     @callback
-    def flow_status(self, nonce: str) -> dict[str, Any] | None:
+    def flow_status(self, nonce: str, *, reveal_bundle: bool = True) -> dict[str, Any] | None:
+        """`reveal_bundle=False` reports state without consuming the one-shot
+        bundle — an unauthenticated/failed poll must never burn it, since a
+        later, properly-authenticated poll is the only other chance the panel
+        ever gets to actually receive it (see `SpotifyStatusView.get`)."""
         self._reap_flows()
         flow = self._flows.get(nonce)
         if flow is None:
@@ -343,10 +347,13 @@ class SpotifyLink:
         if flow.state == "error":
             out["error"] = flow.error
         elif flow.state == "linked" and flow.bundle is not None:
-            out["bundle"] = flow.bundle
-            # one-shot: the panel has it now
-            flow.bundle = None
-            flow.bundle_at = time.monotonic()
+            if reveal_bundle:
+                out["bundle"] = flow.bundle
+                # one-shot: the panel has it now
+                flow.bundle = None
+                flow.bundle_at = time.monotonic()
+            else:
+                out["linked_pending_auth"] = True
         return out
 
 
@@ -512,12 +519,9 @@ class SpotifyStatusView(HomeAssistantView):
         nonce = request.query.get("flow", "")
 
         if nonce:
-            status = link.flow_status(nonce)
+            status = link.flow_status(nonce, reveal_bundle=authed)
             if status is None:
                 return self.json({"state": "expired"})
-            if status.get("bundle") and not authed:
-                # never hand a refresh token to an unauthenticated caller
-                status = {"state": status["state"], "linked_pending_auth": True}
             return self.json(status)
 
         # No flow id: a re-hydrate probe from an already-paired panel.
