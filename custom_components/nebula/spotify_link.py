@@ -376,14 +376,40 @@ def async_register_http(hass: HomeAssistant) -> None:
     hass.http.register_view(SpotifyUnlinkView())
 
 
-def _panel_authorised(hass: HomeAssistant, request: web.Request) -> bool:
+async def _panel_authorised(hass: HomeAssistant, request: web.Request) -> bool:
+    """Panel token, or an *admin's* HA access token — same two-path check
+    `panel.py`'s `_authorized()` already uses for `/api/nebula/panel`, which
+    the panel's own long-lived token (an admin token) already satisfies.
+
+    A prior version of this function accepted *any* signed-in HA user via
+    `requires_auth`-style auth, which let a non-admin household member pull a
+    durable Spotify refresh token with no panel-specific secret needed — a
+    real problem. But narrowing it to "panel-token only" over-corrected: the
+    panel itself has no way to learn `CONF_PANEL_TOKEN` (it's never handed to
+    it anywhere), so it could never actually authenticate here at all, and
+    every `/status` call from the app silently 401'd. Admin-only HA auth
+    closes the original leak (a non-admin user still can't pass) while
+    matching what this module's own docstring has always promised.
+    """
     want = None
     for e in hass.config_entries.async_entries(DOMAIN):
         want = e.options.get(CONF_PANEL_TOKEN)
         if want:
             break
     got = request.headers.get("X-Nebula-Panel-Token")
-    return bool(want) and secrets.compare_digest(str(got or ""), str(want))
+    if want and secrets.compare_digest(str(got or ""), str(want)):
+        return True
+    auth = request.headers.get("Authorization", "")
+    tok = auth[7:] if auth.startswith("Bearer ") else ""
+    if not tok:
+        return False
+    try:
+        result = hass.auth.async_validate_access_token(tok)
+        if hasattr(result, "__await__"):
+            result = await result
+    except Exception:  # noqa: BLE001
+        result = None
+    return bool(result and result.user and result.user.is_admin)
 
 
 class SpotifyStartView(HomeAssistantView):
@@ -480,13 +506,9 @@ class SpotifyStatusView(HomeAssistantView):
         if link is None:
             return self.json_message("Nebula not set up", HTTPStatus.SERVICE_UNAVAILABLE)
 
-        # Panel-token only — NOT "any signed-in HA user" — same restriction the
-        # WS command (ws_spotify_status) already enforces ("the app never needs
-        # the token bundle"). This used to also accept a bare HA user auth,
-        # which meant it never actually applied since every request here comes
-        # from an authenticated HA session; any paired non-admin user could
-        # pull a durable Spotify refresh token with no panel-token needed.
-        authed = _panel_authorised(hass, request)
+        # See _panel_authorised's own docstring for why this accepts the panel
+        # token or an admin HA token, not any signed-in HA user.
+        authed = await _panel_authorised(hass, request)
         nonce = request.query.get("flow", "")
 
         if nonce:
