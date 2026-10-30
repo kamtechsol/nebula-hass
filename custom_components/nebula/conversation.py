@@ -214,6 +214,16 @@ class NebulaConversationEntity(conversation.ConversationEntity):
         if handoff is not None:
             return self._say(user_input, handoff)
 
+        # "play <song> on <device>" — a new track directly on a named Connect
+        # device, as opposed to the handoff case above (relocating whatever's
+        # already playing). Same reason this runs here, before the built-in
+        # agent: it would otherwise try to resolve "the void" as an HA
+        # area/entity, fail, and return a non-error "sorry" that swallows the
+        # phrase. See spotify_transfer.py's module docstring.
+        play_on = await spotify_transfer.async_maybe_play_on(self.hass, text)
+        if play_on is not None:
+            return self._say(user_input, play_on)
+
         # 1) built-in intent agent — device commands and "what's the weather"
         # both answer here. A weather match gets a real forecast screen
         # attached; anything else (a device command) is untouched, voice-only.
