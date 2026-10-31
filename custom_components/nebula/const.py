@@ -15,6 +15,14 @@ CONF_PANEL_TOKEN = "panel_token"
 CONF_SPOTIFY_CLIENT_ID = "spotify_client_id"
 CONF_SPOTIFY_CLIENT_SECRET = "spotify_client_secret"
 
+# Base URL of a self-hosted Nebula web app (e.g. "http://10.0.0.20:5173" or
+# "https://nebula.example.com"), config-entry option, blank by default. When
+# set, the pairing QR encodes a plain http(s) link to it instead of the
+# `nebula://` scheme, so scanning with any camera opens the web app straight
+# into `/pair` rather than only working from inside the native app's own
+# scanner. See pairing.py's pair_uri().
+CONF_WEBAPP_URL = "webapp_url"
+
 # --- conversation.nebula (voice agent) options ------------------------------
 CONF_ASSIST_ENABLED = "assist_enabled"            # bool, default True
 CONF_ASSIST_LOCAL_FIRST = "assist_local_first"    # bool, try built-in intents first

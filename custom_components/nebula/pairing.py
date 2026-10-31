@@ -1,11 +1,21 @@
 """Shared helpers for the Nebula QR pairing flow.
 
-The QR encodes a `nebula://pair?...` deep link the app already understands:
+The QR encodes a `nebula://pair?...` deep link the native app already
+understands:
 
     nebula://pair?host=<lan-ip>&port=<port>&code=<single-use code>&name=<location>
 
 The app scans it, POSTs the code to `/api/nebula/pair`, and gets a long-lived
 token back — so the code (not a token) is what sits on screen.
+
+When a Nebula web app URL is configured (`CONF_WEBAPP_URL`, see const.py),
+the QR instead encodes a plain `http(s)://<webapp>/pair?...` link carrying
+the same query params — any phone camera opens that straight into a browser
+(a custom scheme like `nebula://` only does anything if the native app is
+already installed and registered for it), landing on the web app's own
+`/pair` route, which does the exact same code-for-token POST the native app
+does. The native app's QR scanner is updated to recognize this URL shape
+too, so either form still pairs it.
 """
 
 from __future__ import annotations
@@ -37,11 +47,18 @@ async def async_lan_host_port(hass: HomeAssistant) -> tuple[str, int]:
     return host, port
 
 
-def pair_uri(host: str, port: int, code: str, name: str) -> str:
-    """Build the `nebula://pair?...` deep link embedded in the QR."""
+def pair_uri(host: str, port: int, code: str, name: str, webapp_url: str = "") -> str:
+    """Build the pairing link embedded in the QR.
+
+    `webapp_url` (CONF_WEBAPP_URL, blank by default) switches the scheme from
+    the native-app-only `nebula://pair?...` deep link to a plain `/pair?...`
+    link on that web app, which any camera opens straight into a browser.
+    """
     query = urlencode(
         {"host": host, "port": port, "code": code, "name": name or "Home Assistant"}
     )
+    if webapp_url:
+        return f"{webapp_url.rstrip('/')}/pair?{query}"
     return f"nebula://pair?{query}"
 
 

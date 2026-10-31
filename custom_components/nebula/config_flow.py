@@ -26,6 +26,7 @@ from .const import (
     CONF_SEARCH_API_KEY,
     CONF_SPOTIFY_CLIENT_ID,
     CONF_SPOTIFY_CLIENT_SECRET,
+    CONF_WEBAPP_URL,
     DEFAULT_PERSONA,
     DOMAIN,
 )
@@ -86,6 +87,7 @@ class NebulaOptionsFlow(OptionsFlow):
                     CONF_SEARCH_API_KEY: (
                         user_input.get(CONF_SEARCH_API_KEY) or ""
                     ).strip(),
+                    CONF_WEBAPP_URL: (user_input.get(CONF_WEBAPP_URL) or "").strip().rstrip("/"),
                 },
             )
 
@@ -136,6 +138,12 @@ class NebulaOptionsFlow(OptionsFlow):
                     vol.Optional(
                         CONF_SEARCH_API_KEY,
                         default=opts.get(CONF_SEARCH_API_KEY, ""),
+                    ): str,
+                    # Blank = pairing QR stays the `nebula://` deep link only
+                    # (today's behavior, native-app-scanner-only).
+                    vol.Optional(
+                        CONF_WEBAPP_URL,
+                        default=opts.get(CONF_WEBAPP_URL, ""),
                     ): str,
                 }
             ),

@@ -28,7 +28,8 @@
         "data": {
           "regenerate": "Regenerate panel token",
           "spotify_client_id": "Spotify Client ID",
-          "spotify_client_secret": "Spotify Client Secret"
+          "spotify_client_secret": "Spotify Client Secret",
+          "webapp_url": "Nebula web app URL (optional) — e.g. http://10.0.0.20:5173. Leave blank to keep the pairing QR app-only."
         }
       }
     }
