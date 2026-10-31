@@ -185,7 +185,7 @@ class NebulaPairQRView(HomeAssistantView):
         if not code:
             return web.Response(status=HTTPStatus.NOT_FOUND)
 
-        from .const import CONF_WEBAPP_URL
+        from .const import CONF_WEBAPP_URL, PANEL_WEBAPP_PORT
         from .pairing import async_lan_host_port, pair_uri, qr_png
 
         host, port = await async_lan_host_port(hass)
@@ -194,6 +194,8 @@ class NebulaPairQRView(HomeAssistantView):
             webapp_url = entry.options.get(CONF_WEBAPP_URL, "")
             if webapp_url:
                 break
+        if not webapp_url and manager.panel and manager.panel.panel_ip:
+            webapp_url = f"http://{manager.panel.panel_ip}:{PANEL_WEBAPP_PORT}/app"
         uri = pair_uri(host, port, code, hass.config.location_name, webapp_url)
         try:
             png = await hass.async_add_executor_job(qr_png, uri)

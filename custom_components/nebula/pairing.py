@@ -8,14 +8,20 @@ understands:
 The app scans it, POSTs the code to `/api/nebula/pair`, and gets a long-lived
 token back — so the code (not a token) is what sits on screen.
 
-When a Nebula web app URL is configured (`CONF_WEBAPP_URL`, see const.py),
-the QR instead encodes a plain `http(s)://<webapp>/pair?...` link carrying
-the same query params — any phone camera opens that straight into a browser
-(a custom scheme like `nebula://` only does anything if the native app is
-already installed and registered for it), landing on the web app's own
-`/pair` route, which does the exact same code-for-token POST the native app
-does. The native app's QR scanner is updated to recognize this URL shape
-too, so either form still pairs it.
+When a Nebula web app URL is available, the QR instead encodes a plain
+`http(s)://<webapp>/pair?...` link carrying the same query params — any
+phone camera opens that straight into a browser (a custom scheme like
+`nebula://` only does anything if the native app is already installed and
+registered for it), landing on the web app's own `/pair` route, which does
+the exact same code-for-token POST the native app does. The native app's QR
+scanner is updated to recognize this URL shape too, so either form still
+pairs it.
+
+That URL comes from `CONF_WEBAPP_URL` (see const.py) if explicitly set, else
+api.py falls back to the connected panel's own bundled copy — every panel's
+embedded server (ControlServer.kt, :8770) now serves the web app under
+`/app`, and the panel's source IP is already known from its own outbound
+connection to us, so this needs zero configuration in the common case.
 """
 
 from __future__ import annotations

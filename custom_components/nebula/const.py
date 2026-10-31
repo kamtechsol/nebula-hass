@@ -20,8 +20,14 @@ CONF_SPOTIFY_CLIENT_SECRET = "spotify_client_secret"
 # set, the pairing QR encodes a plain http(s) link to it instead of the
 # `nebula://` scheme, so scanning with any camera opens the web app straight
 # into `/pair` rather than only working from inside the native app's own
-# scanner. See pairing.py's pair_uri().
+# scanner. See pairing.py's pair_uri(). When left blank and a panel is
+# connected, api.py falls back to that panel's own bundled copy instead
+# (see PANEL_WEBAPP_PORT below) — no config needed for the common case.
 CONF_WEBAPP_URL = "webapp_url"
+
+# The panel's embedded LAN server (ControlServer.kt) that now also serves
+# the bundled web app under /app — see CONF_WEBAPP_URL above.
+PANEL_WEBAPP_PORT = 8770
 
 # --- conversation.nebula (voice agent) options ------------------------------
 CONF_ASSIST_ENABLED = "assist_enabled"            # bool, default True

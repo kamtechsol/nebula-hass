@@ -53,6 +53,12 @@ class PanelChannel:
         self._media: dict[str, Any] = empty_media()
         self._last_seen = 0.0
         self._listeners: set[Callable[[dict[str, Any]], None]] = set()
+        # The panel dials *out* to us, so its source IP is the one address we
+        # never have to ask the user to type in — lets the pairing QR default
+        # straight to the panel's own bundled web app (ControlServer.kt, :8770)
+        # with zero config. Kept across reconnects; cleared only if a panel
+        # genuinely never connects.
+        self._panel_ip: str | None = None
 
     def set_token(self, token: str) -> None:
         self._token = token
@@ -70,6 +76,10 @@ class PanelChannel:
     @property
     def media(self) -> dict[str, Any]:
         return self._media
+
+    @property
+    def panel_ip(self) -> str | None:
+        return self._panel_ip
 
     @callback
     def add_listener(self, cb: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
@@ -101,6 +111,7 @@ class PanelChannel:
         if self._ws is not None and not self._ws.closed:
             await self._ws.close(code=4000, message=b"replaced")
         self._ws = ws
+        self._panel_ip = request.remote
         _LOGGER.info("Nebula panel connected from %s", request.remote)
         self._emit({"type": "panel_status", "connected": True})
 
